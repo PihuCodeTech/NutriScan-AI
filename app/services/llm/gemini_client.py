@@ -15,7 +15,6 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Protocol, TypeVar
 
-import httpx
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
@@ -24,6 +23,18 @@ from pydantic import BaseModel, ValidationError
 from app.core.config import Settings
 from app.core.errors import AppError, ai_unavailable
 from app.services.llm import prompts
+
+# Re-exported so scripts/smoke_gemini.py and tests can keep importing them from this module.
+from app.services.llm.retry import (  # noqa: F401
+    RETRY_DELAY_S,
+    describe_error,
+    is_auth_error,
+    is_network_error,
+    is_not_found,
+)
+from app.services.llm.retry import classify as _classify
+from app.services.llm.retry import describe as _describe
+from app.services.llm.retry import unavailable as _unavailable
 from app.services.llm.schemas import (
     ChatHistoryItem,
     ChatTurn,
@@ -41,7 +52,6 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 M = TypeVar("M", bound=BaseModel)
 
-RETRY_DELAY_S = 1.5
 STRUCTURED_TEMPERATURE = 0.2
 CHAT_TEMPERATURE = 0.6
 
@@ -77,91 +87,6 @@ class LLMClient(Protocol):
 
 class _BadResponse(Exception):
     pass
-
-
-_KEY_ERROR_MARKERS = ("api key", "api_key", "unauthenticated", "credential", "permission_denied")
-
-
-def _is_key_problem(exc: BaseException | None) -> bool:
-    """True when Gemini rejected the API key itself (invalid, revoked, wrong project/mode, no permission)."""
-    if not isinstance(exc, genai_errors.ClientError):
-        return False
-    if exc.code in (401, 403):
-        return True
-    if exc.code == 400:
-        text = f"{exc.status or ''} {exc.message or ''} {getattr(exc, 'details', '') or ''}".lower()
-        return any(marker in text for marker in _KEY_ERROR_MARKERS)
-    return False
-
-
-def _classify(exc: BaseException) -> str:
-    """'retry' (transient), 'fallback' (model-specific, go to fallback), or 'fatal'."""
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
-        # The model is too slow right now: waiting another full timeout on it rarely helps.
-        return "fallback"
-    if isinstance(exc, httpx.TransportError):
-        return "retry"
-    if isinstance(exc, genai_errors.ServerError):
-        return "fallback" if exc.code == 504 else "retry"  # 504 DEADLINE_EXCEEDED = slow model
-    if isinstance(exc, genai_errors.ClientError):
-        if exc.code == 429:
-            return "retry"
-        if _is_key_problem(exc):
-            return "fatal"  # the fallback model would reject the same key
-        if exc.code in (400, 404):
-            # Model not found, or a request this model can't serve (e.g. an unsupported schema/feature):
-            # the fallback model may still work.
-            return "fallback"
-        return "fatal"
-    if isinstance(exc, genai_errors.APIError):
-        return "retry" if (exc.code or 0) >= 500 else "fatal"
-    return "retry"
-
-
-def _unavailable(exc: BaseException | None) -> AppError:
-    """Turn the last Gemini failure into a 503 AI_UNAVAILABLE that says what actually went wrong.
-
-    `details.reason` is one of: auth, quota, model, timeout, network, bad_request, unavailable.
-    Messages never contain the key.
-    """
-    if _is_key_problem(exc):
-        return ai_unavailable(
-            "The Gemini API rejected the server's API key. Check GEMINI_API_KEY (and GEMINI_USE_VERTEX) in the "
-            "backend's .env file, then restart the server.",
-            reason="auth",
-        )
-    if isinstance(exc, genai_errors.ClientError) and exc.code == 429:
-        return ai_unavailable(
-            "The Gemini API quota or rate limit for this key was reached. Wait a minute and try again, or check "
-            "the key's limits in Google AI Studio.",
-            reason="quota",
-        )
-    if isinstance(exc, genai_errors.ClientError) and exc.code == 404:
-        return ai_unavailable(
-            "The configured Gemini model isn't available for this key. Run scripts/smoke_gemini.py to list the "
-            "available models, then update GEMINI_MODEL / GEMINI_FALLBACK_MODEL in .env.",
-            reason="model",
-        )
-    if isinstance(exc, genai_errors.ClientError) and exc.code == 400:
-        return ai_unavailable(
-            f"Gemini rejected the request ({exc.status or 'INVALID_ARGUMENT'}). Please try again with a different "
-            "photo or message.",
-            reason="bad_request",
-        )
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
-        return ai_unavailable("The AI took too long to answer. Please try again.", reason="timeout")
-    if isinstance(exc, httpx.TransportError):
-        return ai_unavailable(
-            "The server couldn't reach the Gemini API. Check the server's internet connection (or proxy/VPN).",
-            reason="network",
-        )
-    return ai_unavailable(reason="unavailable")
-
-
-def _describe(exc: BaseException) -> str:
-    if isinstance(exc, genai_errors.APIError):
-        return f"{type(exc).__name__} {exc.code} {exc.status or ''}".strip()
-    return type(exc).__name__
 
 
 def _strip_fences(text: str) -> str:
@@ -552,24 +477,3 @@ async def list_model_names(api_key: str, *, use_vertex: bool) -> list[str]:
         if not actions or "generateContent" in actions:
             names.append((m.name or "").split("/")[-1])
     return names
-
-
-def is_auth_error(exc: BaseException) -> bool:
-    return isinstance(exc, genai_errors.ClientError) and exc.code in (400, 401, 403)
-
-
-def is_network_error(exc: BaseException) -> bool:
-    """The request never reached Google (offline, DNS, proxy, firewall) or got no answer in time."""
-    return isinstance(exc, (httpx.TransportError, asyncio.TimeoutError, TimeoutError))
-
-
-def is_not_found(exc: BaseException) -> bool:
-    return isinstance(exc, genai_errors.ClientError) and exc.code == 404
-
-
-def describe_error(exc: BaseException) -> str:
-    """Short, key-free error description."""
-    if isinstance(exc, genai_errors.APIError):
-        msg = (exc.message or "").replace("\n", " ")[:200]
-        return f"{exc.code} {exc.status or ''}: {msg}".strip()
-    return f"{type(exc).__name__}: {str(exc)[:200]}"
