@@ -25,6 +25,7 @@ class FoodItem(BaseModel):
     serving_description: str | None = None
     confidence: Confidence
     source: ItemSource
+    nutrition_source: Literal["table", "estimate"] = "estimate"  # "table" = looked up in the foods table
     nutrients: Nutrients
 
 
@@ -189,3 +190,4 @@ class ScanItemsPatch(BaseModel):
 class ScanLogIn(BaseModel):
     meal_type: MealType | None = None
     eaten_at: datetime | None = None
+    is_street_food: bool = False

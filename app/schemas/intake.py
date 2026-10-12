@@ -34,6 +34,8 @@ class IntakeEntryOut(BaseModel):
     name: str
     meal_type: MealType
     eaten_at: datetime
+    is_street_food: bool = False
+    is_home_cooked: bool = False
     items: list[FoodItem]
     totals: Nutrients
 
@@ -92,6 +94,8 @@ class ManualIntakeIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     meal_type: MealType
     eaten_at: datetime | None = None
+    is_street_food: bool = False
+    is_home_cooked: bool = False
     items: list[ManualItemIn] = Field(min_length=1, max_length=30)
 
 
@@ -130,4 +134,7 @@ class IntakeSummaryOut(BaseModel):
     averages: Nutrients
     days_logged: int
     streak_days_logged: int
+    street_free_streak_days: int
+    street_food_count: int
+    home_cooked_count: int
     top_foods: list[TopFood]

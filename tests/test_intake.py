@@ -169,3 +169,52 @@ async def test_delete_entry_and_ownership(client, auth_headers, second_user_head
     assert (await client.delete(f"/api/v1/intake/{entry['id']}", headers=auth_headers)).status_code == 404
     other = (await client.get("/api/v1/intake/daily", headers=second_user_headers)).json()["data"]
     assert other["entries"] == []
+
+
+async def test_street_and_home_flags_and_server_streak(client, auth_headers):
+    # a street-food meal and a home-cooked meal
+    await client.post(
+        "/api/v1/intake",
+        headers=auth_headers,
+        json={
+            "name": "Samosa",
+            "meal_type": "snack",
+            "is_street_food": True,
+            "items": [{"name": "Samosa", "nutrients": {"calories": 260}}],
+        },
+    )
+    await client.post(
+        "/api/v1/intake",
+        headers=auth_headers,
+        json={
+            "name": "Dal chawal",
+            "meal_type": "dinner",
+            "is_home_cooked": True,
+            "items": [{"name": "Dal", "nutrients": {"calories": 300}}],
+        },
+    )
+    entries = (await client.get("/api/v1/intake?days=7", headers=auth_headers)).json()["data"]["items"]
+    by_name = {e["name"]: e for e in entries}
+    assert by_name["Samosa"]["is_street_food"] is True and by_name["Samosa"]["is_home_cooked"] is False
+    assert by_name["Dal chawal"]["is_home_cooked"] is True
+
+    summary = (await client.get("/api/v1/intake/summary?days=7", headers=auth_headers)).json()["data"]
+    assert summary["street_food_count"] == 1
+    assert summary["home_cooked_count"] == 1
+    assert summary["street_free_streak_days"] == 0  # a street meal was logged today
+
+
+async def test_scan_can_be_logged_as_street_food(client, auth_headers, sample_jpeg):
+    scan = (
+        await client.post("/api/v1/scans", headers=auth_headers, files={"image": ("p.jpg", sample_jpeg, "image/jpeg")})
+    ).json()["data"]
+    entry = (
+        await client.post(f"/api/v1/scans/{scan['id']}/log", headers=auth_headers, json={"is_street_food": True})
+    ).json()["data"]
+    assert entry["is_street_food"] is True
+
+
+async def test_kitchen_saved_on_profile(client, auth_headers):
+    await client.put("/api/v1/users/me/profile", headers=auth_headers, json={"kitchen": "kettle"})
+    me = (await client.get("/api/v1/users/me", headers=auth_headers)).json()["data"]
+    assert me["profile"]["kitchen"] == "kettle"

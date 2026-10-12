@@ -26,6 +26,7 @@ class Profile(Base):
     allergies: Mapped[list[Any]] = mapped_column(JSON, default=list)
     conditions: Mapped[list[Any]] = mapped_column(JSON, default=list)
     country: Mapped[str] = mapped_column(String(2), default="IN")
+    kitchen: Mapped[str] = mapped_column(String(12), default="burner")  # none | kettle | burner
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata")
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, onupdate=utcnow)
 

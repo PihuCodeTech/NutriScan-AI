@@ -40,6 +40,8 @@ let state;
 let scan = { file: null, url: '', mode: 'meal', result: null, chat: [], added: false, busy: false };
 let cook = { pantry: '', results: null, busy: false, focus: '' };
 let ui = { histFilter: 'all' };
+// Numbers the server owns (goals and the street-free streak), so the UI agrees with the AI. null = not loaded.
+let serverTargets = null, serverStreak = null;
 
 const storeKey = () => 'smf:' + authUid();
 
@@ -77,7 +79,7 @@ const todayMeals = () => state.meals.filter(m => sameDay(m.at, Date.now()));
 const weekMeals = () => state.meals.filter(m => m.at >= Date.now() - 7 * DAY);
 const lastStreetAt = () => state.meals.filter(m => m.street).reduce((latest, m) => Math.max(latest, m.at), 0);
 const runStart = () => Math.max(lastStreetAt(), state.startedOn);
-const streakDays = () => Math.max(0, Math.floor((Date.now() - runStart()) / DAY));
+const streakDays = () => serverStreak != null ? serverStreak : Math.max(0, Math.floor((Date.now() - runStart()) / DAY));
 
 function bestStreak() {
   const marks = [state.startedOn, ...state.meals.filter(m => m.street && m.at >= state.startedOn).map(m => m.at), Date.now()].sort((a, b) => a - b);
@@ -116,8 +118,22 @@ function checkBadges(silent) {
 }
 
 function targets() {
+  if (serverTargets) return serverTargets;  // computed by the backend from the profile (matches the AI)
   const p = state.profile, goal = +p.goal;
   return { cal: goal, protein: Math.max(45, Math.round(p.weight * 0.8)), carbs: Math.round(goal * 0.5 / 4), fat: Math.round(goal * 0.3 / 9) };
+}
+
+// Pull the server-computed targets and street-free streak; the dashboard and rewards read these.
+async function refreshServerNumbers() {
+  if (!signedIn()) { serverTargets = null; serverStreak = null; return; }
+  try {
+    const t = await fetchTargets();
+    if (t && t.calories) serverTargets = { cal: Math.round(t.calories), protein: Math.round(t.protein_g), carbs: Math.round(t.carbohydrates_g), fat: Math.round(t.fat_g) };
+  } catch { /* offline: keep the local estimate */ }
+  try {
+    const sum = await fetchSummary(7);
+    if (sum && typeof sum.street_free_streak_days === 'number') serverStreak = sum.street_free_streak_days;
+  } catch { /* offline */ }
 }
 
 // ---------- Live insights and body impact ----------
@@ -130,7 +146,7 @@ function insights(today) {
   if (cal > tg.cal) out.push({ tone: 'warn', text: `You are ${Math.round(cal - tg.cal)} kcal over your goal for today. Keep the rest of the day to fruit, curd or salad.` });
   else if (cal > tg.cal * 0.9) out.push({ tone: 'info', text: 'You are close to your calorie goal for the day. Choose something light for the rest of it.' });
   if (known('sodium').length && sum(today, 'sodium') > 2000) out.push({ tone: 'warn', text: `Sodium is at ${Math.round(sum(today, 'sodium'))} mg today, past the 2000 mg daily limit. Skip packaged snacks and pickles, and drink water.` });
-  if (today.length >= 2 && known('fibre').length && sum(today, 'fibre') < 10) out.push({ tone: 'info', text: 'Fibre is low so far. Add a salad, a fruit or a bowl of dal to help your gut.' });
+  if (today.length >= 2 && known('fibre').length && sum(today, 'fibre') < 10) out.push({ tone: 'info', text: 'Fibre is low so far. Add a salad, a fruit or a bowl of dal.' });
   if (today.length && cal >= tg.cal * 0.5 && sum(today, 'protein') < tg.protein * 0.5) out.push({ tone: 'info', text: 'Protein is low for this point in the day. Dal, curd, paneer, eggs or sprouts would help.' });
   const streak = streakDays();
   if (!today.some(m => m.street) && streak >= 3 && streak < 7) out.push({ tone: 'good', text: `${7 - streak} more street-free days to your weekly reward.` });
@@ -150,23 +166,24 @@ function bodyImpact() {
   const oily = w.filter(m => m.street || m.fat >= 20).length;
   const fibre = avg('fibre'), sodium = avg('sodium'), sugar = avg('sugar');
 
-  let gut = fibre === null ? null : fibre < 15 ? 2 : fibre < 25 ? 1 : 0;
-  let gutText = fibre === null ? 'Not enough fibre data yet.' : `Fibre averages ${Math.round(fibre)} g a day (aim for 25 g). Dal, vegetables, fruit and sprouts help.`;
-  if (street >= 3) { gut = Math.max(gut ?? 0, 1); gutText += ` ${street} street meals this week also raise the chance of a stomach infection.`; }
+  // Nutrition patterns from the week's logged meals — not organ diagnoses.
+  const salt = sodium === null ? null : sodium > 2300 ? 2 : sodium > 1800 ? 1 : 0;
+  const saltText = sodium === null ? 'Not enough salt data yet.' : `Sodium averages ${Math.round(sodium)} mg a day (WHO suggests under ~2000 mg). Instant noodles, chips and pickles add up fast.`;
 
-  let skin = sugar === null ? (oily >= 3 ? 1 : null) : sugar > 50 ? 2 : sugar > 35 ? 1 : 0;
-  if (oily >= 5) skin = 2; else if (oily >= 3) skin = Math.max(skin ?? 0, 1);
-  const skinText = skin === null ? 'Not enough sugar data yet.' : `${sugar === null ? 'Sugar is unknown' : 'Sugar averages ' + Math.round(sugar) + ' g a day'}, with ${oily} oily or street meal${oily === 1 ? '' : 's'}. Very sugary and oily food is linked with more breakouts.`;
+  const sugarL = sugar === null ? null : sugar > 50 ? 2 : sugar > 35 ? 1 : 0;
+  const sugarText = sugar === null ? 'Not enough sugar data yet.' : `Sugar averages ${Math.round(sugar)} g a day. Sweet drinks, chai and desserts are the usual sources.`;
 
-  const liver = oily >= 4 ? 2 : oily >= 2 ? 1 : 0;
-  const liverText = `${oily} street or very oily meal${oily === 1 ? '' : 's'} this week. Reused frying oil at stalls is the main worry for your liver.`;
+  const fibreL = fibre === null ? null : fibre < 15 ? 2 : fibre < 25 ? 1 : 0;
+  const fibreText = fibre === null ? 'Not enough fibre data yet.' : `Fibre averages ${Math.round(fibre)} g a day (aim for ~25 g). Dal, vegetables, fruit and sprouts help.`;
 
-  const kidney = sodium === null ? null : sodium > 2300 ? 2 : sodium > 1800 ? 1 : 0;
-  const kidneyText = sodium === null ? 'Not enough sodium data yet.' : `Sodium averages ${Math.round(sodium)} mg a day (limit about 2000 mg). Instant noodles, chips and pickles add up fast.`;
+  const friedL = oily >= 4 ? 2 : oily >= 2 ? 1 : 0;
+  const friedText = `${oily} fried or street meal${oily === 1 ? '' : 's'} this week${street ? `, ${street} of them street food` : ''}. Deep-fried food eaten often is worth cutting back.`;
 
   return [
-    { organ: 'Gut', level: gut, text: gutText }, { organ: 'Skin', level: skin, text: skinText },
-    { organ: 'Liver', level: liver, text: liverText }, { organ: 'Kidneys', level: kidney, text: kidneyText },
+    { label: 'Salt', level: salt, text: saltText },
+    { label: 'Sugar', level: sugarL, text: sugarText },
+    { label: 'Fibre', level: fibreL, text: fibreText },
+    { label: 'Fried food', level: friedL, text: friedText },
   ];
 }
 
@@ -199,12 +216,12 @@ const dots = streak => `<div class="dots" aria-hidden="true">${[...Array(7)].map
 
 function impactHtml() {
   const rows = bodyImpact();
-  if (!rows) return '<p class="sub">Log at least 3 meals this week to see how your food is affecting your gut, skin, liver and kidneys.</p>';
-  const word = ['On track', 'Watch', 'Concern'], tone = ['var(--leaf)', 'var(--turmeric)', 'var(--chili)'], fill = [28, 64, 100];
+  if (!rows) return '<p class="sub">Log at least 3 meals this week to see your salt, sugar, fibre and fried-food patterns.</p>';
+  const word = ['On track', 'Watch', 'High'], tone = ['var(--leaf)', 'var(--turmeric)', 'var(--chili)'], fill = [28, 64, 100];
   return `<div class="tray impact">${rows.map(r => `<div class="cell ${r.level === null ? 'nodata' : ''}" style="--fill:${r.level === null ? 0 : fill[r.level]}%;--tone:${r.level === null ? '#ccc' : tone[r.level]}">
-      <small>${r.organ}</small><b>${r.level === null ? 'No data' : word[r.level]}</b><small>this week</small></div>`).join('')}</div>
-    <ul class="reasons">${rows.map(r => `<li><b>${r.organ}.</b> ${esc(r.text)}</li>`).join('')}</ul>
-    <p class="sub small">The fill rises with the level of concern. Based only on the meals you logged, so log every meal for a fair picture. This is general guidance, not a medical diagnosis. Talk to a doctor if you have symptoms.</p>`;
+      <small>${r.label}</small><b>${r.level === null ? 'No data' : word[r.level]}</b><small>this week</small></div>`).join('')}</div>
+    <ul class="reasons">${rows.map(r => `<li><b>${r.label}.</b> ${esc(r.text)}</li>`).join('')}</ul>
+    <p class="sub small">Patterns from the meals you logged this week — general guidance, not medical advice. Log every meal for a fairer picture.</p>`;
 }
 
 // ---------- Pages ----------
@@ -229,7 +246,7 @@ function dashboard() {
       <p class="sub">${claimable() ? 'Your weekly reward is ready to claim.' : streak >= 7 ? 'Weekly reward claimed. Keep going for the next one.' : (7 - streak) + ' more days to your weekly reward.'}</p>
       <button class="btn" data-page="rewards">See rewards</button></div>
   </div>
-  <div class="block"><h3>What this week is doing to your body</h3>${impactHtml()}</div>`;
+  <div class="block"><h3>This week's eating patterns</h3>${impactHtml()}</div>`;
 }
 
 function fitLine(f) {
@@ -252,7 +269,8 @@ function healthHtml(f) {
 function itemsHtml(f) {
   if (!f.items || !f.items.length) return '';
   const conf = { high: '', medium: ' <small class="conf">medium confidence</small>', low: ' <small class="conf low">low confidence</small>' };
-  return `<h4>What is on the plate</h4><ul class="items">${f.items.map(i => `<li><span>${esc(i.name)}${conf[i.confidence] || ''}<br><small>${esc(i.serving || i.grams + ' g')}</small></span><b>${i.cal} kcal</b></li>`).join('')}</ul>`;
+  const src = s => s === 'table' ? ' <small class="src-tag db" title="Nutrients from a curated food database (IFCT/USDA)">DB</small>' : ' <small class="src-tag ai" title="Nutrients estimated by the AI">AI est.</small>';
+  return `<h4>What is on the plate</h4><ul class="items">${f.items.map(i => `<li><span>${esc(i.name)}${conf[i.confidence] || ''}${src(i.nutritionSource)}<br><small>${esc(i.serving || i.grams + ' g')}</small></span><b>${i.cal} kcal</b></li>`).join('')}</ul>`;
 }
 
 function resultHtml() {
@@ -293,6 +311,16 @@ function scanPage() {
   <fieldset class="mode"><legend class="sr">What are you scanning?</legend>
     <label><input type="radio" name="mode" value="meal" ${scan.mode === 'meal' ? 'checked' : ''}>Whole meal</label>
     <label><input type="radio" name="mode" value="label" ${scan.mode === 'label' ? 'checked' : ''}>Product label</label></fieldset>
+  <label class="meal-of-day">Which meal is this?
+    <select id="meal-type">
+      <option value="auto">Not sure / general</option>
+      <option value="breakfast">Breakfast</option>
+      <option value="lunch">Lunch</option>
+      <option value="dinner">Dinner</option>
+      <option value="snack">Snack</option>
+    </select>
+    <small class="sub">Used to score the plate against that meal's share of your day. "Not sure" scores it neutrally.</small>
+  </label>
   <label class="drop"><input type="file" id="file" class="sr" accept="image/*"><span>Choose a photo, take one, or drop it here</span><small id="fname">${scan.file ? esc(scan.file.name) : 'JPG, PNG or WebP'}</small></label>
   <img id="preview" class="preview" alt="Selected food" ${scan.url ? `src="${scan.url}"` : 'hidden'}>
   <div class="actions"><button class="btn" data-act="analyze" id="analyze">Analyze</button></div>
@@ -485,6 +513,7 @@ async function syncNow(manual) {
       } catch { /* the profile is optional: meals have already synced */ }
     }
 
+    await refreshServerNumbers();
     checkBadges(true);
     save(); refreshStatus();
     if (manual) {
@@ -493,7 +522,7 @@ async function syncNow(manual) {
       if (profileChanged) parts.push('your profile was updated from your account');
       toast(parts.length ? `Synced. ${parts.join(' and ')}.` : 'Everything is in sync');
     }
-    if ((fresh || profileChanged || before !== state.meals.length) && pages[currentPage()]) show(currentPage());
+    if (pages[currentPage()]) show(currentPage());  // reflect synced meals, targets and streak
   } catch (e) {
     refreshStatus();
     if (manual) toast('Sync failed. ' + reasonFor(e));
@@ -557,7 +586,7 @@ const actions = {
       scan.mode = mode;
       scan.chat = []; scan.added = false;
       try {
-        scan.result = await analyzeImage(scan.file, mode);
+        scan.result = await analyzeImage(scan.file, mode, $('#meal-type') ? $('#meal-type').value : 'auto');
         state.stats[mode === 'label' ? 'labelScans' : 'mealScans']++;
         save();
       } catch (e) {
@@ -669,7 +698,7 @@ const actions = {
     state.profileTouched = true;
     save();
     if (canSync() && CFG.endpoints.profile) {
-      try { await pushProfile(state.profile); toast('Profile saved and synced'); refreshStatus(); }
+      try { await pushProfile(state.profile); await refreshServerNumbers(); toast('Profile saved and synced'); refreshStatus(); }
       catch (e) { toast('Profile saved on this device. ' + reasonFor(e)); refreshStatus(); }
     } else toast('Profile saved on this device');
     show('profile');
@@ -738,6 +767,7 @@ function watchServer() {
   watchServer();
   await startAuth();
   loadState();
+  await refreshServerNumbers();
   checkBadges(true);
   refreshStatus();
   show(pages[currentPage()] ? currentPage() : 'dashboard');

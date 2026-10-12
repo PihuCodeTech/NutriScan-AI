@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     # Uploads
     MAX_UPLOAD_MB: float = 8
     STORAGE_DIR: str = "./storage/uploads"
+    MEDIA_URL_TTL_S: int = 86400  # how long a signed photo URL stays valid (seconds)
+    GUEST_RETENTION_DAYS: int = 3  # throw-away guest accounts older than this are cleaned up
 
     # Web frontend served at /app (skipped if the folder doesn't exist)
     FRONTEND_DIR: str = "./frontend"

@@ -15,6 +15,7 @@ Sex = Literal["male", "female", "other"]
 ActivityLevel = Literal["sedentary", "light", "moderate", "active", "very_active"]
 Goal = Literal["lose", "maintain", "gain"]
 DietType = Literal["veg", "eggetarian", "non_veg", "vegan"]
+Kitchen = Literal["none", "kettle", "burner"]
 HealthLabel = Literal["good", "moderate", "needs_attention"]
 HealthColor = Literal["green", "amber", "red"]
 

@@ -142,7 +142,9 @@ async def regenerate_tips(
 async def log_scan(scan_id: str, user: CurrentUser, db: DB, body: ScanLogIn | None = None) -> dict:
     body = body or ScanLogIn()
     scan = await scan_service.get_scan(db, user, scan_id)
-    entry = await scan_service.log_scan(db, user, scan, meal_type=body.meal_type, eaten_at=body.eaten_at)
+    entry = await scan_service.log_scan(
+        db, user, scan, meal_type=body.meal_type, eaten_at=body.eaten_at, is_street_food=body.is_street_food
+    )
     return ok(intake_service.to_out(entry), "INTAKE_LOGGED", "Added to your intake")
 
 

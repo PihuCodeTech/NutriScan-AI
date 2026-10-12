@@ -47,6 +47,8 @@ def build_entry(
     eaten_at: datetime | None,
     items: list[dict[str, Any]],
     scan_id: str | None = None,
+    is_street_food: bool = False,
+    is_home_cooked: bool = False,
 ) -> IntakeEntry:
     """Construct (not persist) an intake entry; totals are always computed server-side."""
     eaten = ensure_utc(eaten_at) if eaten_at else utcnow()
@@ -73,6 +75,8 @@ def build_entry(
         local_date=local_date_of(eaten, _tz(user)),
         items=snapshot,
         totals=aggregate(i["nutrients"] for i in snapshot),
+        is_street_food=is_street_food,
+        is_home_cooked=is_home_cooked,
     )
 
 
@@ -84,6 +88,8 @@ def to_out(entry: IntakeEntry) -> dict[str, Any]:
         "name": entry.name,
         "meal_type": entry.meal_type,
         "eaten_at": entry.eaten_at,
+        "is_street_food": entry.is_street_food,
+        "is_home_cooked": entry.is_home_cooked,
         "items": entry.items,
         "totals": entry.totals,
     }
@@ -116,9 +122,12 @@ async def estimate_description(
 async def describe(
     db: AsyncSession, user: User, *, text: str, meal_type: str | None, log: bool, llm: LLMClient
 ) -> dict[str, Any]:
+    meal_type_explicit = meal_type is not None
     meal_type = meal_type or default_meal_type(now_local(_tz(user)))
     meal_name, items, totals, tips = await estimate_description(user, text, llm)
-    health = score_meal(totals, compute_targets(user.profile).nutrients, meal_type, tips=tips)
+    health = score_meal(
+        totals, compute_targets(user.profile).nutrients, meal_type if meal_type_explicit else None, tips=tips
+    )
     out: dict[str, Any] = {
         "meal_name": meal_name,
         "items": items,
@@ -150,7 +159,14 @@ async def create_manual(db: AsyncSession, user: User, data: ManualIntakeIn) -> I
         for i in data.items
     ]
     entry = build_entry(
-        user, source="manual", name=data.name, meal_type=data.meal_type, eaten_at=data.eaten_at, items=items
+        user,
+        source="manual",
+        name=data.name,
+        meal_type=data.meal_type,
+        eaten_at=data.eaten_at,
+        items=items,
+        is_street_food=data.is_street_food,
+        is_home_cooked=data.is_home_cooked,
     )
     db.add(entry)
     await db.commit()
@@ -234,6 +250,19 @@ def _streak(logged_days: set[date], today: date) -> int:
     return streak
 
 
+def _account_start(user: User) -> date:
+    created = getattr(user, "created_at", None)
+    return created.date() if created else date.today()
+
+
+def _street_free_streak(street_dates: set[date], today: date, account_start: date) -> int:
+    """Consecutive days up to today with no street-food entry, bounded by when the account started."""
+    if not street_dates:
+        return max(0, (today - account_start).days)
+    last_street = max(d for d in street_dates if d <= today) if any(d <= today for d in street_dates) else None
+    return max(0, (today - last_street).days) if last_street else max(0, (today - account_start).days)
+
+
 async def summary(db: AsyncSession, user: User, days: int) -> dict[str, Any]:
     """Per-day totals (zero-filled), averages over logged days, streak and top foods."""
     today = today_for(user)
@@ -275,15 +304,53 @@ async def summary(db: AsyncSession, user: User, days: int) -> dict[str, Any]:
         {k: sum(d["totals"][k] for d in logged) / len(logged) for k in NUTRIENT_KEYS} if logged else {}
     )
     # A streak can extend beyond the window, so look further back for it.
-    streak_rows = await db.scalars(
-        select(IntakeEntry.local_date)
-        .distinct()
-        .where(IntakeEntry.user_id == user.id, IntakeEntry.local_date >= today - timedelta(days=366))
+    logged_dates = set(
+        await db.scalars(
+            select(IntakeEntry.local_date)
+            .distinct()
+            .where(IntakeEntry.user_id == user.id, IntakeEntry.local_date >= today - timedelta(days=366))
+        )
+    )
+    # Days (within the window) with a street-food entry, plus all-time home-cooked / street counts.
+    street_dates = set(
+        await db.scalars(
+            select(IntakeEntry.local_date)
+            .distinct()
+            .where(
+                IntakeEntry.user_id == user.id,
+                IntakeEntry.is_street_food.is_(True),
+                IntakeEntry.local_date >= today - timedelta(days=366),
+            )
+        )
+    )
+    home_cooked_count = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(IntakeEntry)
+            .where(IntakeEntry.user_id == user.id, IntakeEntry.is_home_cooked.is_(True))
+        )
+        or 0
+    )
+    window_start = today - timedelta(days=days - 1)
+    street_food_count = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(IntakeEntry)
+            .where(
+                IntakeEntry.user_id == user.id,
+                IntakeEntry.is_street_food.is_(True),
+                IntakeEntry.local_date >= window_start,
+            )
+        )
+        or 0
     )
     return {
         "days": out_days,
         "averages": averages,
         "days_logged": len(logged),
-        "streak_days_logged": _streak(set(streak_rows), today),
+        "streak_days_logged": _streak(logged_dates, today),
+        "street_free_streak_days": _street_free_streak(street_dates, today, _account_start(user)),
+        "street_food_count": street_food_count,
+        "home_cooked_count": home_cooked_count,
         "top_foods": [{"name": display[k], "count": c} for k, c in foods.most_common(TOP_FOODS_LIMIT)],
     }

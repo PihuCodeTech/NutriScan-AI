@@ -87,7 +87,7 @@ async def test_image_message_stored_with_url(client, auth_headers, mock_llm):
     r = await _send(client, auth_headers, session["id"], image=make_jpeg())
     assert r.status_code == 201, r.text
     user_msg = r.json()["data"]["user_message"]
-    assert user_msg["image_url"].startswith("http://testserver/media/")
+    assert user_msg["image_url"].startswith("http://testserver/api/v1/media/")
     assert (await client.get(user_msg["image_url"].replace("http://testserver", ""))).status_code == 200
     history = mock_llm.last_kwargs["chat_turn"]["history"]
     assert history[-1].image is not None and history[-1].image_mime == "image/jpeg"

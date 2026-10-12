@@ -188,21 +188,6 @@ Train with `ml/finetune_indian_food.py` (see [`ml/README.md`](ml/README.md)), th
 `CLASSIFIER_MODEL_ID=ml/output/indian-food-vit` (or your Hugging Face Hub id) and restart. `/health` shows
 `"classifier": "loaded"` and scan responses report the model id in `classifier.model`.
 
-## Web app
-
-Start the server and open **http://127.0.0.1:8000/** (or `http://localhost:8000/`): it redirects to the web
-app at `/app/`. The terminal prints the address at startup. Sign in, create an account, or choose **Continue as
-guest**: guests get a real (throw-away) account on the server, so every AI feature works the same:
-
-| Feature | Endpoint | Powered by |
-|---|---|---|
-| Food photo scan | `POST /api/v1/scans` | classifier hints + Gemini vision |
-| Chat about a meal | `POST /api/v1/chat/sessions/{id}/messages` | Gemini with function calling |
-| Meal ideas from your ingredients | `POST /api/v1/recipes/suggest` | Gemini |
-| Today's insight | `GET /api/v1/insights/daily` | Gemini |
-
-If Gemini fails, the page shows the reason (see below) and never substitutes a sample result.
-
 ## Troubleshooting AI errors
 
 When Gemini can't answer, AI endpoints return `503 AI_UNAVAILABLE` with a specific message and
@@ -215,7 +200,7 @@ When Gemini can't answer, AI endpoints return `503 AI_UNAVAILABLE` with a specif
 | `quota` | Rate limit or free-tier quota reached (429) | Wait a minute, or check the key's limits in AI Studio |
 | `model` | `GEMINI_MODEL` / `GEMINI_FALLBACK_MODEL` not available for this key | `smoke_gemini.py` lists available models and suggests names |
 | `network` | The server can't reach Google (offline, proxy, VPN, firewall) | Check the machine's internet connection |
-| `timeout` | Neither model answered within `GEMINI_TIMEOUT_S` | Try again; raise `GEMINI_TIMEOUT_S`, or keep `GEMINI_THINKING_LEVEL=low` |
+| `timeout` | No answer within `GEMINI_TIMEOUT_S` × 3 attempts | Try again; raise `GEMINI_TIMEOUT_S` |
 | `bad_request` | Both models rejected the request itself | Try another photo/message; check the server log |
 
 The server log has the exact Google error for each attempt (`"msg": "gemini attempt failed"`), without the key.
@@ -230,3 +215,50 @@ The server log has the exact Google error for each attempt (`"msg": "gemini atte
   to a doctor or registered dietitian and to respond with care to signs of disordered eating.
 - Rate limiting is in-memory (single process); uploads are on local disk and served publicly by unguessable
   URL. See `BUILD_REPORT.md` for next steps.
+
+---
+
+## Cloud database (Postgres)
+
+User data is stored in SQLite locally and in **Postgres** in the cloud — no code change, just a setting. Free
+options: [Neon](https://neon.tech) or [Supabase](https://supabase.com) (sign in with GitHub).
+
+1. Create a free Postgres project and copy its connection string.
+2. Change the prefix `postgresql://` → `postgresql+asyncpg://` and put it in `.env`:
+   ```
+   DATABASE_URL=postgresql+asyncpg://user:password@host/dbname
+   ```
+3. Create the tables and seed the foods table, then start the server:
+   ```
+   alembic upgrade head        # creates every table on the fresh Postgres
+   uvicorn app.main:app --reload
+   ```
+The server seeds the 52-food nutrition table on first startup and cleans up old guest accounts.
+
+> Switching from the local `nutriscan.db` created before this version? Delete it first (`rm nutriscan.db`) so
+> it's recreated with the current schema — it only holds demo/test data.
+
+## How nutrition is estimated
+
+Gemini identifies each item on the plate and estimates its weight in grams. The **server** then computes the
+nutrients from a curated foods table (`app/data/foods_seed.json`, IFCT 2017 / USDA per-100 g values) wherever
+the dish is known, and only falls back to the model's own numbers for foods not in the table. Each item in the
+response carries `nutrition_source: "table" | "estimate"` so the UI (and judges) can see which is which. Add
+more foods by editing the seed file and running `python scripts/seed_foods.py`.
+
+## Photo privacy
+
+Uploaded photos are **not** public. They are served only through `GET /api/v1/media/{path}` with a signed,
+expiring URL (HMAC over the path, valid for `MEDIA_URL_TTL_S`, default 24 h). The URLs are generated for the
+owner when scan/chat data is returned and work directly in `<img>` tags.
+
+## Guest accounts
+
+`POST /auth/guest` creates a throw-away account so people can try the AI without signing up. These are deleted
+(with their photos) after `GUEST_RETENTION_DAYS` (default 3) on startup and via `python scripts/cleanup_guests.py`
+(schedule it daily in production).
+
+## The web app is a demo client
+
+`frontend/` is a single-file vanilla-JS client for trying the backend end to end. It is intentionally not a
+production frontend — that is a separate project. Treat `app.js` as a demo, not a template to extend.

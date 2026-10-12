@@ -15,6 +15,8 @@ from app.services.nutrition import NUTRIENT_KEYS, Nutrients, coerce, round_nutri
 ACTIVITY_FACTORS = {"sedentary": 1.2, "light": 1.375, "moderate": 1.55, "active": 1.725, "very_active": 1.9}
 GOAL_ADJUST = {"lose": -400, "maintain": 0, "gain": 300}
 MEAL_SHARES = {"breakfast": 0.25, "lunch": 0.35, "dinner": 0.30, "snack": 0.10}
+# Used when the meal type is unknown, so the same plate scores the same regardless of the time of day.
+NEUTRAL_SHARE = 1 / 3
 CALORIE_FLOOR_MIN = 1200.0
 
 GOAL_NUTRIENTS = ("calories", "protein_g", "carbohydrates_g", "fat_g", "fiber_g")
@@ -137,13 +139,17 @@ def _flag(nutrient: str, level: str, value: float, meal_target: float, meal_type
 
 
 def score_meal(
-    totals: dict[str, Any], daily_targets: dict[str, Any], meal_type: str, tips: list[str] | None = None
+    totals: dict[str, Any], daily_targets: dict[str, Any], meal_type: str | None, tips: list[str] | None = None
 ) -> dict[str, Any]:
-    """Meal score 0–100 with flags (§6.2). Returns a `Health` dict (tips passed through)."""
+    """Meal score 0–100 with flags (§6.2). Returns a `Health` dict (tips passed through).
+
+    When `meal_type` is None or not a known type, a neutral one-third-of-day share is used, so a plate is not
+    scored more harshly just because it was scanned at a snack time of day."""
     t = coerce(totals)
-    share = MEAL_SHARES.get(meal_type, MEAL_SHARES["snack"])
+    share = MEAL_SHARES.get(meal_type or "", NEUTRAL_SHARE)
     meal_target = {k: v * share for k, v in coerce(daily_targets).items()}
     r = {k: _ratio(t[k], meal_target[k]) for k in NUTRIENT_KEYS}
+    label_type = meal_type if meal_type in MEAL_SHARES else "meal"
     snack = meal_type == "snack"
     score = 100.0
     flags: list[dict[str, Any]] = []
@@ -152,7 +158,7 @@ def score_meal(
         nonlocal score
         if r[nutrient] > threshold:
             score -= min(cap, slope * (r[nutrient] - threshold))
-            flags.append(_flag(nutrient, "high", t[nutrient], meal_target[nutrient], meal_type))
+            flags.append(_flag(nutrient, "high", t[nutrient], meal_target[nutrient], label_type))
 
     over("sodium_mg", 1.0, 25, 25)
     over("sugar_g", 1.0, 20, 20)
@@ -163,12 +169,12 @@ def score_meal(
     factor = 0.5 if snack else 1.0
     if r["protein_g"] < 0.6:
         score -= 15 * factor
-        flags.append(_flag("protein_g", "low", t["protein_g"], meal_target["protein_g"], meal_type))
+        flags.append(_flag("protein_g", "low", t["protein_g"], meal_target["protein_g"], label_type))
     elif r["protein_g"] < 0.9:
         score -= 7 * factor
     if r["fiber_g"] < 0.5:
         score -= 10 * factor
-        flags.append(_flag("fiber_g", "low", t["fiber_g"], meal_target["fiber_g"], meal_type))
+        flags.append(_flag("fiber_g", "low", t["fiber_g"], meal_target["fiber_g"], label_type))
     elif r["fiber_g"] < 0.8:
         score -= 5 * factor
 

@@ -10,6 +10,8 @@ from typing import Protocol
 
 from anyio import Path as AsyncPath
 
+from app.core import media
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,10 +25,12 @@ class Storage(Protocol):
 class LocalStorage:
     """Saves to `STORAGE_DIR/YYYY/MM/<uuid>.<ext>`; served read-only at `/media`."""
 
-    def __init__(self, root: str, public_base_url: str) -> None:
+    def __init__(self, root: str, public_base_url: str, secret: str, url_ttl_s: int) -> None:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.public_base_url = public_base_url.rstrip("/")
+        self.secret = secret
+        self.url_ttl_s = url_ttl_s
 
     def _abs(self, rel_path: str) -> Path:
         path = (self.root / rel_path).resolve()
@@ -52,4 +56,6 @@ class LocalStorage:
             logger.warning("could not delete stored file", extra={"path": rel_path})
 
     def url(self, rel_path: str) -> str:
-        return f"{self.public_base_url}/media/{rel_path}"
+        """A signed, expiring URL to the file (served by GET /api/v1/media/...)."""
+        exp, sig = media.sign(rel_path, self.secret, self.url_ttl_s)
+        return f"{self.public_base_url}/api/v1/media/{rel_path}?exp={exp}&sig={sig}"

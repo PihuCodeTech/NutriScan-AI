@@ -26,7 +26,9 @@ async def test_scan_happy_path(client, auth_headers, sample_jpeg, mock_llm, sett
     # server-computed totals equal the sum of items
     for key in NUTRIENT_KEYS:
         assert scan["totals"][key] == pytest.approx(sum(i["nutrients"][key] for i in scan["items"]), abs=0.15)
-    assert scan["totals"]["calories"] == 432
+    # nutrients are grounded in the foods table where the dish is known (not the model's raw numbers)
+    assert any(i["nutrition_source"] == "table" for i in scan["items"])
+    assert 250 <= scan["totals"]["calories"] <= 700
 
     health = scan["health"]
     assert 0 <= health["score"] <= 100
@@ -47,6 +49,7 @@ async def test_scan_happy_path(client, auth_headers, sample_jpeg, mock_llm, sett
         "serving_description",
         "confidence",
         "source",
+        "nutrition_source",
         "nutrients",
     }
     assert item["source"] == "ai" and item["confidence"] in {"high", "medium", "low"}
@@ -56,11 +59,16 @@ async def test_scan_happy_path(client, auth_headers, sample_jpeg, mock_llm, sett
     assert kwargs["hints"][0]["label"] == "chicken_curry"
     assert kwargs["description"] == "hostel lunch"
     assert "Country: IN" in kwargs["user_ctx"]
-    assert scan["image_url"].startswith("http://testserver/media/")
-    rel = scan["image_url"].split("/media/")[1]
+    # image is served only through a signed, expiring URL under /api/v1/media
+    assert scan["image_url"].startswith("http://testserver/api/v1/media/")
+    assert "sig=" in scan["image_url"] and "exp=" in scan["image_url"]
+    path_and_query = scan["image_url"].replace("http://testserver", "")
+    rel = path_and_query.split("/api/v1/media/")[1].split("?")[0]
     assert (Path(settings.STORAGE_DIR) / rel).exists()
-    media = await client.get(f"/media/{rel}")
+    media = await client.get(path_and_query)  # signed URL works (no auth header needed)
     assert media.status_code == 200 and media.headers["content-type"] == "image/jpeg"
+    assert (await client.get(f"/api/v1/media/{rel}")).status_code == 422  # missing signature
+    assert (await client.get(f"/api/v1/media/{rel}?exp=1&sig=bad")).status_code == 403  # bad/expired
 
 
 async def test_scan_default_meal_type(client, auth_headers, sample_jpeg):
@@ -206,7 +214,7 @@ async def test_list_filter_by_date(client, auth_headers, sample_jpeg):
 
 async def test_delete_scan_removes_image(client, auth_headers, sample_jpeg, settings):
     scan = (await create_scan(client, auth_headers, sample_jpeg)).json()["data"]
-    rel = scan["image_url"].split("/media/")[1]
+    rel = scan["image_url"].split("/api/v1/media/")[1].split("?")[0]
     r = await client.delete(f"/api/v1/scans/{scan['id']}", headers=auth_headers)
     assert r.status_code == 200 and r.json()["code"] == "DELETED" and r.json()["data"] is None
     assert not (Path(settings.STORAGE_DIR) / rel).exists()

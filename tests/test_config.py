@@ -65,3 +65,19 @@ async def test_classifier_reports_loading_while_it_loads(monkeypatch):
     monkeypatch.setattr(clf, "_load_sync", lambda: (seen.append(clf.status), setattr(clf, "_pipe", object())))
     await clf.load()
     assert seen == ["loading"] and clf.status == "loaded"
+
+
+def test_engine_kwargs_for_sqlite_and_supabase():
+    from sqlalchemy.pool import NullPool
+
+    from app.db.session import _engine_kwargs
+
+    assert _engine_kwargs("sqlite+aiosqlite:///./x.db") == {"connect_args": {"timeout": 30}}
+
+    supabase = _engine_kwargs("postgresql+asyncpg://postgres.ref:pw@aws-0-ap-south-1.pooler.supabase.com:5432/postgres")
+    assert supabase["poolclass"] is NullPool
+    assert supabase["connect_args"]["statement_cache_size"] == 0
+    assert "ssl" in supabase["connect_args"]  # TLS for a remote host
+
+    local = _engine_kwargs("postgresql+asyncpg://postgres@127.0.0.1:5432/nutriscan")
+    assert "ssl" not in local["connect_args"]  # no TLS needed for a local Postgres

@@ -21,7 +21,8 @@ from app.core.logging import RequestContextMiddleware, configure_logging
 from app.core.rate_limit import limiter
 from app.db import models  # noqa: F401  (registers tables)
 from app.db.base import Base
-from app.db.session import dispose_engine, get_engine, init_engine
+from app.db.session import dispose_engine, get_engine, get_sessionmaker, init_engine
+from app.services import maintenance, nutrition_db
 
 logger = logging.getLogger("app")
 
@@ -59,6 +60,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Convenience for local runs/tests; production uses `alembic upgrade head`.
         async with get_engine().begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    # Load the nutrition reference table (52 Indian/common foods) if it's empty, so scans can ground
+    # nutrients in curated per-100 g values instead of trusting the model's numbers. Idempotent and cheap.
+    try:
+        async with get_sessionmaker()() as session:
+            if await nutrition_db.count(session) == 0:
+                await nutrition_db.seed(session)
+    except Exception:
+        logger.exception("could not seed the foods table; scans will fall back to AI estimates")
+    try:
+        async with get_sessionmaker()() as session:
+            await maintenance.cleanup_guests(session, app.state.storage, settings.GUEST_RETENTION_DAYS)
+    except Exception:
+        logger.exception("guest cleanup failed")
     # Load the classifier in the background: the first run downloads ~350 MB, and the API (and the web app)
     # must be reachable meanwhile. Until it is ready, scans simply run without classifier hints.
     classifier_task = asyncio.create_task(app.state.classifier.load(), name="classifier-load")
@@ -125,7 +139,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
 
     Path(settings.STORAGE_DIR).mkdir(parents=True, exist_ok=True)
-    app.mount("/media", StaticFiles(directory=settings.STORAGE_DIR), name="media")
     app.include_router(api_router)
 
     # The web frontend (static HTML/JS) is served from the same origin, so no CORS setup is needed.

@@ -116,6 +116,7 @@ function fromScan(s) {
   const items = (s.items || []).map(i => ({
     id: i.id, name: i.name, grams: i.quantity_g, serving: i.serving_description, confidence: i.confidence,
     cal: Math.round(num(i.nutrients?.calories) ?? 0), protein: round1(num(i.nutrients?.protein_g) ?? 0),
+    nutritionSource: i.nutrition_source || 'estimate',
   }));
   const name = s.meal_name || (items[0] && items[0].name) || 'Your meal';
   const health = s.health || null;
@@ -135,7 +136,7 @@ function fromEntry(e) {
   return {
     ...fromNutrients(e.totals), id: e.id, remoteId: e.id, scanId: e.scan_id || null, name: e.name,
     at: Date.parse(e.eaten_at) || Date.now(), mealType: e.meal_type, source: e.source,
-    street: isStreetFood(names), home: false, synced: true,
+    street: e.is_street_food ?? isStreetFood(names), home: e.is_home_cooked ?? false, synced: true,
   };
 }
 
@@ -163,12 +164,13 @@ const LABEL_HINT = 'Photo of a packaged food or its nutrition label. Estimate on
 
 // The real pipeline: classifier hints + Gemini vision on the server.
 // Throws for real failures (not food, AI unavailable, offline) so the page can show the reason.
-async function analyzeImage(file, mode) {
+async function analyzeImage(file, mode, mealType) {
   if (!signedIn()) throw notSignedInError();
   const img = await prepareImage(file);
   const form = new FormData();
   form.append(CFG.imageField, img, img.name);
   if (mode === 'label') form.append('description', LABEL_HINT);
+  if (mealType && mealType !== 'auto') form.append('meal_type', mealType);
   const data = await callApi(endpoint('scans'), { method: 'POST', body: form, timeoutMs: CFG.aiTimeoutMs });
   return fromScan(data);
 }
@@ -243,7 +245,7 @@ async function pushMeal(m) {
   if (m.scanId) {
     try {
       const entry = await callApi(`${endpoint('scans')}/${m.scanId}/log`, {
-        method: 'POST', ...jsonBody({ meal_type: m.mealType || mealTypeAt(m.at), eaten_at: new Date(m.at).toISOString() }),
+        method: 'POST', ...jsonBody({ meal_type: m.mealType || mealTypeAt(m.at), eaten_at: new Date(m.at).toISOString(), is_street_food: !!m.street }),
       });
       return entry.id;
     } catch (e) {
@@ -255,6 +257,7 @@ async function pushMeal(m) {
     method: 'POST',
     ...jsonBody({
       name: m.name.slice(0, 120), meal_type: m.mealType || mealTypeAt(m.at), eaten_at: new Date(m.at).toISOString(),
+      is_street_food: !!m.street, is_home_cooked: !!m.home,
       items: [{ name: m.name.slice(0, 120), serving_description: m.home ? 'home-cooked portion' : '1 serving', nutrients: toNutrients(m) }],
     }),
   });
@@ -280,6 +283,7 @@ async function fetchRemoteProfile() {
   if (p.activity_level) out.activity = ACTIVITY_FROM_API[p.activity_level];
   if (p.goal) out.goalDir = p.goal;
   if (p.diet_type) out.diet = DIET_FROM_API[p.diet_type];
+  if (p.kitchen) out.kitchen = p.kitchen;
   if (me.onboarding_complete) {
     const t = await fetchTargets();
     if (t?.calories) out.goal = Math.round(t.calories);
@@ -294,6 +298,11 @@ const pushProfile = p => callApi(endpoint('profile'), {
   ...jsonBody({
     age: Math.round(+p.age), sex: p.sex, height_cm: +p.height, weight_kg: +p.weight,
     activity_level: ACTIVITY_TO_API[p.activity] || 'light', goal: p.goalDir || 'maintain',
-    diet_type: DIET_TO_API[p.diet] || 'veg',
+    diet_type: DIET_TO_API[p.diet] || 'veg', kitchen: p.kitchen || 'burner',
   }),
 });
+
+// Daily totals + server-computed targets (the UI's single source of truth for goals).
+const fetchDaily = () => callApi(endpoint('intake') + '/daily');
+// Multi-day summary incl. the server-computed street-free streak and home-cooked count.
+const fetchSummary = (days = 7) => callApi(`${endpoint('intake')}/summary?days=${days}`);

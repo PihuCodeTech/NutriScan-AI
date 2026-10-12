@@ -59,11 +59,12 @@ def test_gif_format_rejected():
 
 
 async def test_local_storage_roundtrip(tmp_path):
-    storage = LocalStorage(str(tmp_path), "http://example.test/")
+    storage = LocalStorage(str(tmp_path), "http://example.test/", "test-secret", 86400)
     rel = await storage.save(b"abc", "jpg")
     assert rel.count("/") == 2 and rel.endswith(".jpg")
     assert await storage.read(rel) == b"abc"
-    assert storage.url(rel) == f"http://example.test/media/{rel}"
+    url = storage.url(rel)
+    assert url.startswith(f"http://example.test/api/v1/media/{rel}?exp=") and "sig=" in url
     await storage.delete(rel)
     assert not (tmp_path / rel).exists()
     with pytest.raises(ValueError):

@@ -62,7 +62,8 @@ async def test_remove_rename_and_add(client, auth_headers, sample_jpeg, mock_llm
     assert renamed["source"] == "user_edit" and renamed["quantity_g"] == 150
     added = data["items"][2]
     assert added["source"] == "user_added" and added["quantity_g"] == 100
-    assert added["nutrients"]["calories"] == 61  # mock curd 61 kcal / 100 g
+    # curd is in the foods table (60 kcal/100 g), so the server uses that, not the model's 61
+    assert added["nutrition_source"] == "table" and added["nutrients"]["calories"] == 60
     assert mock_llm.calls["estimate_from_text"] == 2
     assert mock_llm.last_kwargs["estimate_from_text"]["text"] == "100 g Curd"
     assert data["totals"]["calories"] == pytest.approx(_sum(data["items"], "calories"), abs=1)

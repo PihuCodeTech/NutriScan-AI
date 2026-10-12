@@ -4440,6 +4440,15 @@
             ],
             "title": "Source"
           },
+          "nutrition_source": {
+            "type": "string",
+            "enum": [
+              "table",
+              "estimate"
+            ],
+            "title": "Nutrition Source",
+            "default": "estimate"
+          },
           "nutrients": {
             "$ref": "#/components/schemas/Nutrients"
           }
@@ -4674,6 +4683,16 @@
             "format": "date-time",
             "title": "Eaten At"
           },
+          "is_street_food": {
+            "type": "boolean",
+            "title": "Is Street Food",
+            "default": false
+          },
+          "is_home_cooked": {
+            "type": "boolean",
+            "title": "Is Home Cooked",
+            "default": false
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/FoodItem"
@@ -4737,6 +4756,18 @@
             "type": "integer",
             "title": "Streak Days Logged"
           },
+          "street_free_streak_days": {
+            "type": "integer",
+            "title": "Street Free Streak Days"
+          },
+          "street_food_count": {
+            "type": "integer",
+            "title": "Street Food Count"
+          },
+          "home_cooked_count": {
+            "type": "integer",
+            "title": "Home Cooked Count"
+          },
           "top_foods": {
             "items": {
               "$ref": "#/components/schemas/TopFood"
@@ -4751,6 +4782,9 @@
           "averages",
           "days_logged",
           "streak_days_logged",
+          "street_free_streak_days",
+          "street_food_count",
+          "home_cooked_count",
           "top_foods"
         ],
         "title": "IntakeSummaryOut"
@@ -4860,6 +4894,16 @@
               }
             ],
             "title": "Eaten At"
+          },
+          "is_street_food": {
+            "type": "boolean",
+            "title": "Is Street Food",
+            "default": false
+          },
+          "is_home_cooked": {
+            "type": "boolean",
+            "title": "Is Home Cooked",
+            "default": false
           },
           "items": {
             "items": {
@@ -5374,6 +5418,16 @@
             "type": "string",
             "title": "Timezone",
             "default": "Asia/Kolkata"
+          },
+          "kitchen": {
+            "type": "string",
+            "enum": [
+              "none",
+              "kettle",
+              "burner"
+            ],
+            "title": "Kitchen",
+            "default": "burner"
           }
         },
         "type": "object",
@@ -5541,6 +5595,22 @@
               }
             ],
             "title": "Timezone"
+          },
+          "kitchen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "kettle",
+                  "burner"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kitchen"
           }
         },
         "type": "object",
@@ -5837,6 +5907,11 @@
               }
             ],
             "title": "Eaten At"
+          },
+          "is_street_food": {
+            "type": "boolean",
+            "title": "Is Street Food",
+            "default": false
           }
         },
         "type": "object",

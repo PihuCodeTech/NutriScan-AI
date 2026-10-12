@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.common import ActivityLevel, DietType, Goal, Nutrients, Sex
+from app.schemas.common import ActivityLevel, DietType, Goal, Kitchen, Nutrients, Sex
 
 
 class ProfileOut(BaseModel):
@@ -22,6 +22,7 @@ class ProfileOut(BaseModel):
     conditions: list[str] = []
     country: str = "IN"
     timezone: str = "Asia/Kolkata"
+    kitchen: Kitchen = "burner"
 
 
 def _clean_list(values: list[str] | None) -> list[str] | None:
@@ -65,6 +66,7 @@ class ProfileUpdate(BaseModel):
     conditions: list[str] | None = Field(None, max_length=20)
     country: str | None = Field(None, min_length=2, max_length=2)
     timezone: str | None = Field(None, max_length=64)
+    kitchen: Kitchen | None = None
 
     @field_validator("allergies", "conditions")
     @classmethod

@@ -133,19 +133,45 @@ within each section.
     `gemini-2.0-flash` straight from the browser). That page now falls back to its sample data and points to
     `/app/`. The current app (`frontend/`) never sees the key.
 
-## Everything AI goes through Gemini (2026-10-11, second pass)
-46. **No sample results or canned answers in the web app.** The old local "guest mode" showed a built-in
-    sample scan ("Samosa (2 pieces)") and rule-based chat replies without calling the server. "Continue as
-    guest" now calls `POST /api/v1/auth/guest`, which creates a real throw-away account (`is_guest: true`),
-    so guests get the same Gemini scans, chat, meal ideas and insight. Browsers that chose guest in the old
-    version are moved to a guest session automatically. AI failures show the reason, never a fake answer.
-47. **`POST /api/v1/recipes/suggest`** (new): Gemini meal ideas from the ingredients a student has, within
-    their kitchen (`none|kettle|burner`), diet and allergies. Nutrients are sanitised server-side; recipes
-    needing more equipment than allowed are dropped. Replaces the page's built-in recipe matcher.
-48. **The daily insight is always written by Gemini**, including days with nothing logged (it was static
-    text), and tips are no longer padded with canned ones.
-49. **Faster Gemini calls.** `GEMINI_THINKING_LEVEL=low` (default) is sent to every call; a model that
-    refuses the setting is retried without it and remembered. A timeout or 504 DEADLINE_EXCEEDED now goes
-    straight to the fallback model instead of waiting another full timeout on the same slow model (the smoke
-    test showed a 62 s text estimate: two 30 s timeouts on gemini-3.8-flash before the fallback answered).
-50. **The server prints the web app address** at startup in dev: `NutriScan web app → <PUBLIC_BASE_URL>/app/`.
+## Correctness, security and ops pass (2026-10-13)
+51. **Nutrients are grounded in a foods table, not invented by the model.** New `foods` + `food_aliases`
+    tables (model `app/db/models/food.py`), seeded from `app/data/foods_seed.json` (52 Indian/common foods,
+    per-100 g values from IFCT 2017 / USDA, with aliases). On every scan, describe and item-add, Gemini
+    estimates the item and its grams; `app/services/nutrition_db.ground_items` replaces the nutrients with
+    `per-100 g × grams` from the table where the `canonical_name` (or an alias) matches, and marks each item
+    `nutrition_source: "table" | "estimate"`. Foods not in the table keep the (sanitised) AI estimate. The
+    table is seeded on startup when empty; `scripts/seed_foods.py` forces a refresh.
+52. **The same plate scores the same all day.** The scan page now has a meal-type picker; the chosen type is
+    stored as `meal_type` with `meal_type_explicit=true`. When the user doesn't pick one, the stored type is
+    still guessed from the clock for display, but the health score is computed against a neutral one-third of
+    the day (`NEUTRAL_SHARE`) instead of the clock-guessed meal's share. Same for `POST /intake/describe`.
+53. **One source of truth for targets.** The web dashboard reads the server-computed targets
+    (`GET /users/me/targets`) and caches them; the old browser-side `targets()` is only a fallback when
+    offline. The UI and the AI now show the same goals.
+54. **Tags, kitchen and the streak live on the server.** `intake_entries` gained `is_street_food` and
+    `is_home_cooked`; `profiles` gained `kitchen`. `GET /intake/summary` now returns
+    `street_free_streak_days`, `street_food_count` and `home_cooked_count`, computed server-side, so they
+    survive across devices and guest sessions. The frontend sends the flags when logging and reads the streak
+    from the server.
+55. **Uploaded photos are no longer a public bucket.** The `/media` static mount is gone; photos are served
+    by `GET /api/v1/media/{path}` only with a valid HMAC signature and unexpired `exp` (see
+    `app/core/media.py`). `storage.url()` returns a signed URL that works in an `<img>` tag and expires after
+    `MEDIA_URL_TTL_S` (default 24 h).
+56. **Guest accounts are cleaned up.** `app/services/maintenance.cleanup_guests` deletes guest accounts (and
+    their photos) older than `GUEST_RETENTION_DAYS` (default 3). It runs once at startup and via
+    `scripts/cleanup_guests.py` (put that on a daily schedule in production).
+57. **No organ-diagnosis claims.** The weekly card now reports nutrition patterns (Salt, Sugar, Fibre, Fried
+    food) instead of rating the gut/skin/liver/kidneys, and the sign-in copy was reworded to match.
+58. **Dependencies pinned.** `requirements.txt` pins every package except torch/transformers (heavy,
+    platform-specific; install the CPU torch wheel separately) to the exact tested versions.
+59. **The web app (`frontend/`) is kept as a simple demo client**, not split into modules: the production
+    frontend is a separate later project, so the churn and risk of restructuring a working single-file client
+    weren't worth it. It is documented as a demo client.
+
+## Database
+- Cloud storage uses **Postgres** (Neon/Supabase free tier) via `DATABASE_URL=postgresql+asyncpg://...`; no
+  code change. MongoDB was considered but would have meant rewriting the whole data layer for the same result.
+- Because this project had no production data, the new tables and columns were folded into migration `0001`
+  rather than added as `0002`. A fresh `alembic upgrade head` (e.g. on the new Postgres) creates everything.
+  An existing local `nutriscan.db` created before this pass should be deleted so it is recreated with the new
+  schema (it only held demo/test data).

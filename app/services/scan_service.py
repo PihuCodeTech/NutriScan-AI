@@ -21,6 +21,7 @@ from app.services.health_engine import compute_targets, score_meal
 from app.services.llm.gemini_client import LLMClient
 from app.services.llm.schemas import FoodAnalysisLLM, LLMFoodItem
 from app.services.nutrition import aggregate, canonicalize, per_100g, round_nutrients, sanitize, scale
+from app.services.nutrition_db import ground_items
 from app.services.storage import Storage
 from app.services.user_service import user_context
 from app.utils.timeutil import day_bounds_utc, default_meal_type, get_tz, now_local
@@ -44,6 +45,7 @@ def item_from_llm(item: LLMFoodItem, *, source: str = "ai") -> dict[str, Any]:
         "serving_description": (item.serving_description or "").strip()[:200] or None,
         "confidence": item.confidence,
         "source": source,
+        "nutrition_source": "estimate",  # set to "table" by ground_items when the food is in the foods table
         "nutrients": nutrients,
         "nutrients_per_100g": per_100g(nutrients, qty),
     }
@@ -58,6 +60,7 @@ def scan_item_dict(it: ScanItem) -> dict[str, Any]:
         "serving_description": it.serving_description,
         "confidence": it.confidence,
         "source": it.source,
+        "nutrition_source": it.nutrition_source,
         "nutrients": it.nutrients,
     }
 
@@ -148,7 +151,8 @@ async def create_scan(
     started = time.perf_counter()
     image = await images.validate_and_normalise(upload, settings.max_upload_bytes)
     tz = get_tz(user.profile.timezone if user.profile else None)
-    meal_type = meal_type or default_meal_type(now_local(tz))
+    meal_type_explicit = meal_type is not None  # user picked it → score against that meal's share
+    meal_type = meal_type or default_meal_type(now_local(tz))  # a sensible label for display/logging
     description = description.strip()[:300] if description and description.strip() else None
 
     rel_path = await storage.save(image.data, "jpg")
@@ -171,6 +175,7 @@ async def create_scan(
         image_sha256=image.sha256,
         description=description,
         meal_type=meal_type,
+        meal_type_explicit=meal_type_explicit,
         classifier_model=classifier.model_id if predictions is not None else None,
         classifier_predictions=predictions,
         ai_model=llm.last_model_used,
@@ -189,12 +194,15 @@ async def create_scan(
         raise AppError("NOT_FOOD", "No food detected in the image.", 422, {"scan_id": scan.id, "reason": reason})
 
     items = [item_from_llm(i) for i in analysis.items]
+    await ground_items(db, items)  # replace estimates with foods-table values where the dish is known
     totals = aggregate(i["nutrients"] for i in items)
     targets = compute_targets(user.profile).nutrients
     scan.status = "completed"
     scan.meal_name = (analysis.meal_name or items[0]["name"]).strip()[:120]
     scan.totals = totals
-    scan.health = score_meal(totals, targets, meal_type, tips=_clean_tips(analysis.tips))
+    scan.health = score_meal(
+        totals, targets, meal_type if meal_type_explicit else None, tips=_clean_tips(analysis.tips)
+    )
     scan.items = [ScanItem(position=pos, **it) for pos, it in enumerate(items)]
     scan.latency_ms = int((time.perf_counter() - started) * 1000)
     db.add(scan)
@@ -219,7 +227,12 @@ def _recompute(scan: Scan, user: User) -> None:
         it.position = pos
     scan.totals = aggregate(i.nutrients for i in scan.items)
     tips = (scan.health or {}).get("tips", [])
-    scan.health = score_meal(scan.totals, compute_targets(user.profile).nutrients, scan.meal_type, tips=tips)
+    scan.health = score_meal(
+        scan.totals,
+        compute_targets(user.profile).nutrients,
+        scan.meal_type if scan.meal_type_explicit else None,
+        tips=tips,
+    )
 
 
 def _ensure_completed(scan: Scan) -> None:
@@ -227,15 +240,19 @@ def _ensure_completed(scan: Scan) -> None:
         raise AppError("VALIDATION_ERROR", "This scan was rejected (no food), so it can't be edited or logged.", 422)
 
 
-async def _estimate_single(llm: LLMClient, user: User, name: str, grams: float | None) -> dict[str, Any]:
+async def _estimate_single(
+    db: AsyncSession, llm: LLMClient, user: User, name: str, grams: float | None
+) -> dict[str, Any]:
     text = f"{grams:g} g {name}" if grams else name
     est = await llm.estimate_from_text(text, user_ctx=user_context(user))
     if not est.is_food or not est.items:
         raise AppError("NOT_FOOD", f"Couldn't recognise '{name}' as a food.", 422)
     item = item_from_llm(est.items[0])
     if grams:  # the estimate may report a different weight; rescale linearly to what the user asked for
-        item["nutrients"] = scale(item["nutrients_per_100g"], grams)
         item["quantity_g"] = round(grams, 1)
+    await ground_items(db, [item])  # prefer the foods table for this item too
+    if grams:
+        item["nutrients"] = scale(item["nutrients_per_100g"], grams)
     return item
 
 
@@ -245,7 +262,7 @@ async def edit_items(db: AsyncSession, user: User, scan: Scan, edits: list[ItemE
     by_id = {i.id: i for i in scan.items}
     for edit in edits:
         if edit.id is None:
-            est = await _estimate_single(llm, user, edit.name or "", edit.quantity_g)
+            est = await _estimate_single(db, llm, user, edit.name or "", edit.quantity_g)
             scan.items.append(
                 ScanItem(
                     position=len(scan.items),
@@ -255,6 +272,7 @@ async def edit_items(db: AsyncSession, user: User, scan: Scan, edits: list[ItemE
                     serving_description=f"{est['quantity_g']:g} g (added)",
                     confidence=est["confidence"],
                     source="user_added",
+                    nutrition_source=est.get("nutrition_source", "estimate"),
                     nutrients=est["nutrients"],
                     nutrients_per_100g=est["nutrients_per_100g"],
                 )
@@ -269,10 +287,11 @@ async def edit_items(db: AsyncSession, user: User, scan: Scan, edits: list[ItemE
             continue
         grams = edit.quantity_g if edit.quantity_g is not None else item.quantity_g
         if edit.name is not None and edit.name.strip() != item.name:
-            est = await _estimate_single(llm, user, edit.name.strip(), grams)
+            est = await _estimate_single(db, llm, user, edit.name.strip(), grams)
             item.name = edit.name.strip()[:120]
             item.canonical_name = est["canonical_name"]
             item.confidence = est["confidence"]
+            item.nutrition_source = est.get("nutrition_source", "estimate")
             item.nutrients_per_100g = est["nutrients_per_100g"]
             item.nutrients = est["nutrients"]
             item.quantity_g = est["quantity_g"]
@@ -307,7 +326,13 @@ async def regenerate_tips(db: AsyncSession, user: User, scan: Scan, llm: LLMClie
 
 
 async def log_scan(
-    db: AsyncSession, user: User, scan: Scan, *, meal_type: str | None, eaten_at: datetime | None
+    db: AsyncSession,
+    user: User,
+    scan: Scan,
+    *,
+    meal_type: str | None,
+    eaten_at: datetime | None,
+    is_street_food: bool = False,
 ) -> IntakeEntry:
     """Create an intake entry from the scan. Logging twice → ALREADY_LOGGED."""
     _ensure_completed(scan)
@@ -323,6 +348,7 @@ async def log_scan(
         eaten_at=eaten_at,
         items=[scan_item_dict(i) for i in scan.items],
         scan_id=scan.id,
+        is_street_food=is_street_food,
     )
     db.add(entry)
     await db.flush()

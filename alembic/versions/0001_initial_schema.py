@@ -64,6 +64,7 @@ def upgrade() -> None:
         sa.Column("conditions", sa.JSON(), nullable=False),
         sa.Column("country", sa.String(length=2), nullable=False),
         sa.Column("timezone", sa.String(length=64), nullable=False),
+        sa.Column("kitchen", sa.String(length=12), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_profiles_user_id_users"), ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("user_id", name=op.f("pk_profiles")),
@@ -76,6 +77,7 @@ def upgrade() -> None:
         sa.Column("image_sha256", sa.String(length=64), nullable=False),
         sa.Column("description", sa.String(length=300), nullable=True),
         sa.Column("meal_type", sa.String(length=12), nullable=False),
+        sa.Column("meal_type_explicit", sa.Boolean(), nullable=False),
         sa.Column("meal_name", sa.String(length=120), nullable=True),
         sa.Column("classifier_model", sa.String(length=200), nullable=True),
         sa.Column("classifier_predictions", sa.JSON(), nullable=True),
@@ -125,6 +127,8 @@ def upgrade() -> None:
         sa.Column("local_date", sa.Date(), nullable=False),
         sa.Column("items", sa.JSON(), nullable=False),
         sa.Column("totals", sa.JSON(), nullable=False),
+        sa.Column("is_street_food", sa.Boolean(), nullable=False),
+        sa.Column("is_home_cooked", sa.Boolean(), nullable=False),
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
@@ -150,6 +154,7 @@ def upgrade() -> None:
         sa.Column("serving_description", sa.String(length=200), nullable=True),
         sa.Column("confidence", sa.String(length=10), nullable=False),
         sa.Column("source", sa.String(length=12), nullable=False),
+        sa.Column("nutrition_source", sa.String(length=12), nullable=False),
         sa.Column("nutrients", sa.JSON(), nullable=False),
         sa.Column("nutrients_per_100g", sa.JSON(), nullable=False),
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -182,6 +187,37 @@ def upgrade() -> None:
     with op.batch_alter_table("chat_messages", schema=None) as batch_op:
         batch_op.create_index(batch_op.f("ix_chat_messages_session_id"), ["session_id"], unique=False)
 
+    op.create_table(
+        "foods",
+        sa.Column("canonical_name", sa.String(length=120), nullable=False),
+        sa.Column("display_name", sa.String(length=120), nullable=False),
+        sa.Column("per_100g", sa.JSON(), nullable=False),
+        sa.Column("serving_g", sa.Float(), nullable=False),
+        sa.Column("serving_name", sa.String(length=60), nullable=False),
+        sa.Column("source", sa.String(length=40), nullable=False),
+        sa.Column("region", sa.String(length=8), nullable=False),
+        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_foods")),
+    )
+    with op.batch_alter_table("foods", schema=None) as batch_op:
+        batch_op.create_index(batch_op.f("ix_foods_canonical_name"), ["canonical_name"], unique=True)
+
+    op.create_table(
+        "food_aliases",
+        sa.Column("alias", sa.String(length=120), nullable=False),
+        sa.Column("food_id", sa.String(length=36), nullable=False),
+        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["food_id"], ["foods.id"], name=op.f("fk_food_aliases_food_id_foods"), ondelete="CASCADE"
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_food_aliases")),
+    )
+    with op.batch_alter_table("food_aliases", schema=None) as batch_op:
+        batch_op.create_index(batch_op.f("ix_food_aliases_alias"), ["alias"], unique=True)
+        batch_op.create_index(batch_op.f("ix_food_aliases_food_id"), ["food_id"], unique=False)
+
     with op.batch_alter_table("scans", schema=None) as batch_op:
         batch_op.create_foreign_key(
             "fk_scans_logged_intake_id_intake_entries",
@@ -199,6 +235,8 @@ def downgrade() -> None:
     with op.batch_alter_table("chat_messages", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_chat_messages_session_id"))
 
+    op.drop_table("food_aliases")
+    op.drop_table("foods")
     op.drop_table("chat_messages")
     with op.batch_alter_table("scan_items", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_scan_items_scan_id"))

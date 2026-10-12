@@ -12,6 +12,7 @@ from alembic import context
 from app.core.config import get_settings
 from app.db import models  # noqa: F401  (registers tables)
 from app.db.base import Base
+from app.db.session import _engine_kwargs
 
 config = context.config
 if config.config_file_name is not None:
@@ -48,7 +49,8 @@ def _do_run(connection: Connection) -> None:
 
 
 async def run_migrations_online() -> None:
-    engine = create_async_engine(_url())
+    # Same TLS/pooler settings as the app, so `alembic upgrade head` works against Supabase.
+    engine = create_async_engine(_url(), **_engine_kwargs(_url()))
     async with engine.connect() as connection:
         await connection.run_sync(_do_run)
     await engine.dispose()

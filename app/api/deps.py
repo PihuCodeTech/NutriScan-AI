@@ -36,7 +36,7 @@ def build_classifier(settings: Settings) -> Classifier:
 
 
 def build_storage(settings: Settings) -> Storage:
-    return LocalStorage(settings.STORAGE_DIR, settings.PUBLIC_BASE_URL)
+    return LocalStorage(settings.STORAGE_DIR, settings.PUBLIC_BASE_URL, settings.JWT_SECRET, settings.MEDIA_URL_TTL_S)
 
 
 def get_llm(request: Request) -> LLMClient:

@@ -21,3 +21,5 @@ class IntakeEntry(UUIDPk, CreatedAt, Base):
     local_date: Mapped[date] = mapped_column(Date, index=True)
     items: Mapped[list[Any]] = mapped_column(JSON, default=list)
     totals: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    is_street_food: Mapped[bool] = mapped_column(default=False)
+    is_home_cooked: Mapped[bool] = mapped_column(default=False)
