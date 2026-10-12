@@ -1,0 +1,31 @@
+{
+  "success": true,
+  "code": "OK",
+  "message": "OK",
+  "data": {
+    "calories": 1770.0,
+    "protein_g": 55.0,
+    "carbohydrates_g": 254.8,
+    "fat_g": 59.0,
+    "saturated_fat_g": 19.7,
+    "fiber_g": 26.6,
+    "sugar_g": 44.2,
+    "sodium_mg": 2000.0,
+    "basis": "profile",
+    "explanation": "Mifflin–St Jeor BMR 1289 kcal × activity factor = TDEE 1772 kcal, adjusted for your goal (never below max(1200, BMR)). Protein by body weight; fat 30% and saturated fat 10% of calories; fibre 15 g per 1000 kcal; sugar ≤10% of calories; sodium ≤2000 mg.",
+    "bmr": 1289.0,
+    "tdee": 1772.4,
+    "goal_nutrients": [
+      "calories",
+      "protein_g",
+      "carbohydrates_g",
+      "fat_g",
+      "fiber_g"
+    ],
+    "limit_nutrients": [
+      "saturated_fat_g",
+      "sugar_g",
+      "sodium_mg"
+    ]
+  }
+}

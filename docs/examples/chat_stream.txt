@@ -1,0 +1,24 @@
+event: user_message
+data: {"id": "db0e682e-62e5-493a-8732-6f9d837fb243", "role": "user", "content": "log a banana as snack", "image_url": null, "tool_calls": null, "created_at": "2026-09-28T10:36:45.501810Z"}
+
+event: tool
+data: {"name": "log_meal", "summary": "Logging your meal…"}
+
+event: delta
+data: {"text": "Done! I've log"}
+
+event: delta
+data: {"text": "ged **Banana**"}
+
+event: delta
+data: {"text": " (~115 kcal) t"}
+
+event: delta
+data: {"text": "o your snack. "}
+
+event: delta
+data: {"text": "Anything else?"}
+
+event: done
+data: {"id": "d8385886-896b-4acf-abcf-0a3c4a268381", "role": "assistant", "content": "Done! I've logged **Banana** (~115 kcal) to your snack. Anything else?", "image_url": null, "tool_calls": [{"name": "log_meal", "args": {"description": "a banana", "meal_type": "snack"}, "summary": "Logged Banana to your snack"}], "created_at": "2026-09-28T10:36:45.508565Z"}
+

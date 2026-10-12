@@ -1,0 +1,36 @@
+# docker compose up --build   →  API on http://localhost:8000 (docs at /docs), Postgres 16 alongside.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nutriscan
+      POSTGRES_PASSWORD: nutriscan
+      POSTGRES_DB: nutriscan
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nutriscan -d nutriscan"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      APP_ENV: prod
+      DATABASE_URL: postgresql+asyncpg://nutriscan:nutriscan@db:5432/nutriscan
+      STORAGE_DIR: /data/uploads
+      HF_HOME: /data/hf-cache
+    ports:
+      - "8000:8000"
+    volumes:
+      - appdata:/data          # uploads + Hugging Face model cache survive restarts
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:

@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "code": "OK",
+  "message": "OK",
+  "data": {
+    "suggestions": [
+      "How can I make this meal healthier?",
+      "Is this enough protein for me?",
+      "What should I eat later today to balance this meal?",
+      "Is this meal good for muscle gain?"
+    ]
+  }
+}

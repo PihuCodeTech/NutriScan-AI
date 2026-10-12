@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "code": "OK",
+  "message": "OK",
+  "data": {
+    "date": "2026-09-28",
+    "headline": "Nice work logging today!",
+    "summary": "You're at about 66% of your calorie target so far. Keep meals balanced with protein and fibre.",
+    "tips": [
+      "Add curd, dal or eggs to your next meal for protein.",
+      "Snack on fruit or roasted chana instead of chips.",
+      "Keep a water bottle at your desk and sip through the day."
+    ],
+    "health_status": "on_track",
+    "disclaimer": "Estimates only — not medical advice."
+  }
+}

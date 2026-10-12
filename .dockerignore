@@ -1,0 +1,13 @@
+.venv
+.env
+*.db
+storage
+ml/data
+ml/output
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+tests
+docs

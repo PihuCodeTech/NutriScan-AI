@@ -1,0 +1,6473 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NutriScan AI API",
+    "description": "Backend for **NutriScan AI** — an AI food nutrition scanner and nutrition chatbot for students living in\nhostels or on their own.\n\n* **Scan** a food photo: a transfer-learned classifier (ViT fine-tuned on Food-101) gives hints, Gemini vision\n  identifies every item and estimates portions and nutrients, and the backend computes totals and a\n  deterministic health score.\n* **Chat** with NutriBuddy (Gemini, text + images, function calling over your own data).\n* **Track** daily intake, trends and daily insights.\n\nEvery response uses the envelope `{success, code, message, data}`. Authenticate with `Authorization: Bearer\n<token>` from `/auth/register` or `/auth/login`. *Estimates only — not medical advice.*\n",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Service health",
+        "description": "Liveness plus the status of the database, the classifier (`loading|loaded|disabled|error`) and Gemini (`configured|mock|missing`). No auth.",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_HealthOut_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meta": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Units, labels and enums for the UI",
+        "description": "Nutrient keys with units and labels, meal/diet/activity/goal options, health label thresholds and colours, the disclaimer and the max upload size. No auth. Use this instead of hard-coding values in the frontend.",
+        "operationId": "meta_api_v1_meta_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_MetaOut_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create an account",
+        "description": "Registers a user (email is lower-cased) and returns a 7-day bearer token.",
+        "operationId": "register_api_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TokenOut_"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EMAIL_TAKEN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "EMAIL_TAKEN": {
+                    "summary": "EMAIL_TAKEN",
+                    "value": {
+                      "success": false,
+                      "code": "EMAIL_TAKEN",
+                      "message": "An account with this email already exists."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Log in",
+        "description": "Exchange email + password for a bearer token.",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TokenOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INVALID_CREDENTIALS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "INVALID_CREDENTIALS": {
+                    "summary": "INVALID_CREDENTIALS",
+                    "value": {
+                      "success": false,
+                      "code": "INVALID_CREDENTIALS",
+                      "message": "Incorrect email or password."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/guest": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start a guest session",
+        "description": "Creates a throw-away guest account (`user.is_guest = true`) and returns a 7-day bearer token, so people who don't sign up still get real AI scans, chat and suggestions. Limited to 30 per hour per IP.",
+        "operationId": "guest_api_v1_auth_guest_post",
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TokenOut_"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Current user",
+        "description": "The user, their profile and whether onboarding is complete (age, sex, height, weight, activity and goal all set).",
+        "operationId": "me_api_v1_users_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_UserOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/me/profile": {
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Update profile (partial)",
+        "description": "Upsert the profile. All fields are optional; only the fields you send are changed. Send `null` to clear a field.",
+        "operationId": "update_profile_api_v1_users_me_profile_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_UserOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/me/targets": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Daily nutrition targets",
+        "description": "Computed daily targets (Nutrients shape) plus `basis` (`profile` or `default`) and a short explanation. Mifflin–St Jeor BMR × activity, goal-adjusted, never below max(1200, BMR).",
+        "operationId": "targets_api_v1_users_me_targets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TargetsOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scans": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Scan a food photo",
+        "description": "Multipart upload. Pipeline: validate & normalise image → transfer-learned classifier hints (ViT/Food-101) → Gemini vision per-item analysis → server-side totals → deterministic health score and flags (+ Gemini tips). `meal_type` defaults from the user's local time. Non-food images return `422 NOT_FOOD` (the rejected scan is stored; its id is in `details.scan_id`).",
+        "operationId": "create_scan_api_v1_scans_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_scan_api_v1_scans_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ScanResult_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_IMAGE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "INVALID_IMAGE": {
+                    "summary": "INVALID_IMAGE",
+                    "value": {
+                      "success": false,
+                      "code": "INVALID_IMAGE",
+                      "message": "The file is not a valid JPEG, PNG or WebP image."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "FILE_TOO_LARGE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "FILE_TOO_LARGE": {
+                    "summary": "FILE_TOO_LARGE",
+                    "value": {
+                      "success": false,
+                      "code": "FILE_TOO_LARGE",
+                      "message": "Image is larger than 8 MB."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "NOT_FOOD, VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOOD": {
+                    "summary": "NOT_FOOD",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOOD",
+                      "message": "No food detected in the image."
+                    }
+                  },
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "AI_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_UNAVAILABLE": {
+                    "summary": "AI_UNAVAILABLE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_UNAVAILABLE",
+                      "message": "The AI service is temporarily unavailable. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI_BAD_RESPONSE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_BAD_RESPONSE": {
+                    "summary": "AI_BAD_RESPONSE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_BAD_RESPONSE",
+                      "message": "The AI returned an invalid response. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "List scans",
+        "description": "Newest first. Optional `date` (YYYY-MM-DD, user's timezone) filter.",
+        "operationId": "list_scans_api_v1_scans_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "YYYY-MM-DD in the user's timezone",
+              "title": "Date"
+            },
+            "description": "YYYY-MM-DD in the user's timezone"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_ScanSummary__"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get a scan",
+        "description": "Full `ScanResult` for one of your scans (other users' scans return 404).",
+        "operationId": "get_scan_api_v1_scans__scan_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ScanResult_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Delete a scan",
+        "description": "Deletes the scan and its image. Intake entries created from it are kept.",
+        "operationId": "delete_scan_api_v1_scans__scan_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NoneType_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}/items": {
+      "patch": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Edit scan items",
+        "description": "Apply edits in order. `{id, quantity_g}` rescales nutrients linearly; `{id, name}` renames and re-estimates that item (Gemini text); `{id, remove: true}` removes; `{name, quantity_g?}` without an id adds a new item (Gemini text). Totals, score and flags are recomputed; tips are kept (regenerate with `POST /scans/{id}/tips`).",
+        "operationId": "edit_items_api_v1_scans__scan_id__items_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanItemsPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ScanResult_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "NOT_FOOD, VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOOD": {
+                    "summary": "NOT_FOOD",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOOD",
+                      "message": "No food detected in the image."
+                    }
+                  },
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "AI_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_UNAVAILABLE": {
+                    "summary": "AI_UNAVAILABLE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_UNAVAILABLE",
+                      "message": "The AI service is temporarily unavailable. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI_BAD_RESPONSE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_BAD_RESPONSE": {
+                    "summary": "AI_BAD_RESPONSE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_BAD_RESPONSE",
+                      "message": "The AI returned an invalid response. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}/tips": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Regenerate tips",
+        "description": "Ask Gemini for fresh tips for the current items, totals and flags.",
+        "operationId": "regenerate_tips_api_v1_scans__scan_id__tips_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ScanResult_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "AI_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_UNAVAILABLE": {
+                    "summary": "AI_UNAVAILABLE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_UNAVAILABLE",
+                      "message": "The AI service is temporarily unavailable. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI_BAD_RESPONSE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_BAD_RESPONSE": {
+                    "summary": "AI_BAD_RESPONSE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_BAD_RESPONSE",
+                      "message": "The AI returned an invalid response. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}/log": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Add scan to today's intake",
+        "description": "Creates an intake entry (source `scan`) from the scan's current items. Logging twice → 409.",
+        "operationId": "log_scan_api_v1_scans__scan_id__log_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ScanLogIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_IntakeEntryOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ALREADY_LOGGED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ALREADY_LOGGED": {
+                    "summary": "ALREADY_LOGGED",
+                    "value": {
+                      "success": false,
+                      "code": "ALREADY_LOGGED",
+                      "message": "This scan is already logged to your intake."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/describe": {
+      "post": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Estimate a meal from text",
+        "description": "Gemini estimates items from a description like '2 roti, dal and a glass of lassi'. Returns items, server-computed totals and health. With `log=true` it is also saved (source `description`).",
+        "operationId": "describe_api_v1_intake_describe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DescribeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_DescribeOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "NOT_FOOD, VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "NOT_FOOD": {
+                    "summary": "NOT_FOOD",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOOD",
+                      "message": "No food detected in the image."
+                    }
+                  },
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "AI_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "AI_UNAVAILABLE": {
+                    "summary": "AI_UNAVAILABLE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_UNAVAILABLE",
+                      "message": "The AI service is temporarily unavailable. Please try again."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI_BAD_RESPONSE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "AI_BAD_RESPONSE": {
+                    "summary": "AI_BAD_RESPONSE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_BAD_RESPONSE",
+                      "message": "The AI returned an invalid response. Please try again."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/intake": {
+      "post": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Log a meal manually",
+        "description": "For when the frontend already has the numbers. Totals are computed server-side.",
+        "operationId": "create_manual_api_v1_intake_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualIntakeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_IntakeEntryOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "List intake entries",
+        "description": "Entries from the last `days` local days (1–90, default 30), newest first, paginated. Used for history screens; use `/intake/daily` for one day with totals and targets.",
+        "operationId": "list_entries_api_v1_intake_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 30,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_IntakeEntryOut__"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/daily": {
+      "get": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Daily intake",
+        "description": "Entries for a local date (default today), totals vs targets, remaining, percent of target, `health_status` (`on_track|over|under|no_data`) and status flags for chips.",
+        "operationId": "daily_api_v1_intake_daily_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "YYYY-MM-DD; default today",
+              "title": "Date"
+            },
+            "description": "YYYY-MM-DD; default today"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_DailyIntakeOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/summary": {
+      "get": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Multi-day summary",
+        "description": "Last `days` days (1–31, zero-filled), averages over logged days, current logging streak and most frequent foods.",
+        "operationId": "summary_api_v1_intake_summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 31,
+              "minimum": 1,
+              "default": 7,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_IntakeSummaryOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/intake/{entry_id}": {
+      "delete": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Delete an intake entry",
+        "description": "Removes the entry from your log. If it came from a scan, that scan can be logged again.",
+        "operationId": "delete_entry_api_v1_intake__entry_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NoneType_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/insights/daily": {
+      "get": {
+        "tags": [
+          "insights"
+        ],
+        "summary": "Daily insight",
+        "description": "Encouraging headline, 2-sentence summary and 3 tips written by Gemini over the day's server-computed numbers. Cached per (user, date, totals); `no_data` days get a static nudge without an AI call.",
+        "operationId": "daily_insight_api_v1_insights_daily_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "YYYY-MM-DD; default today",
+              "title": "Date"
+            },
+            "description": "YYYY-MM-DD; default today"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_DailyInsightOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "AI_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_UNAVAILABLE": {
+                    "summary": "AI_UNAVAILABLE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_UNAVAILABLE",
+                      "message": "The AI service is temporarily unavailable. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI_BAD_RESPONSE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_BAD_RESPONSE": {
+                    "summary": "AI_BAD_RESPONSE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_BAD_RESPONSE",
+                      "message": "The AI returned an invalid response. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/suggestions": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Starter prompts",
+        "description": "4 starter prompts; pass `scan_id` for meal-specific ones.",
+        "operationId": "get_suggestions_api_v1_chat_suggestions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Suggestions_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/sessions": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Create a chat session",
+        "description": "Optionally link a scan (`scan_id`) so that meal is in the chatbot's context. Without a title, the first message's first ~6 words become the title.",
+        "operationId": "create_session_api_v1_chat_sessions_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatSessionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ChatSessionOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "List chat sessions",
+        "description": "Most recently active first, with a preview of the last message.",
+        "operationId": "list_sessions_api_v1_chat_sessions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_ChatSessionOut__"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Get a chat session with messages",
+        "description": "Messages oldest first. Assistant messages include a concise `tool_calls` trace.",
+        "operationId": "get_session_api_v1_chat_sessions__session_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ChatSessionDetail_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Rename a chat session",
+        "description": "Set a new title (1–120 characters).",
+        "operationId": "rename_session_api_v1_chat_sessions__session_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatSessionRename"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ChatSessionOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Delete a chat session",
+        "description": "Deletes the session, its messages and any photos sent in it.",
+        "operationId": "delete_session_api_v1_chat_sessions__session_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NoneType_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/sessions/{session_id}/messages": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Send a message",
+        "description": "Multipart: `text` and/or `image`. Runs the Gemini tool loop (reads intake/scans/profile, can log meals when asked) and returns both the saved user message and the assistant reply.",
+        "operationId": "send_message_api_v1_chat_sessions__session_id__messages_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_send_message_api_v1_chat_sessions__session_id__messages_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ChatExchange_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "EMPTY_MESSAGE, INVALID_IMAGE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "EMPTY_MESSAGE": {
+                    "summary": "EMPTY_MESSAGE",
+                    "value": {
+                      "success": false,
+                      "code": "EMPTY_MESSAGE",
+                      "message": "Type a message or attach a photo."
+                    }
+                  },
+                  "INVALID_IMAGE": {
+                    "summary": "INVALID_IMAGE",
+                    "value": {
+                      "success": false,
+                      "code": "INVALID_IMAGE",
+                      "message": "The file is not a valid JPEG, PNG or WebP image."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "FILE_TOO_LARGE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "FILE_TOO_LARGE": {
+                    "summary": "FILE_TOO_LARGE",
+                    "value": {
+                      "success": false,
+                      "code": "FILE_TOO_LARGE",
+                      "message": "Image is larger than 8 MB."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "AI_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_UNAVAILABLE": {
+                    "summary": "AI_UNAVAILABLE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_UNAVAILABLE",
+                      "message": "The AI service is temporarily unavailable. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI_BAD_RESPONSE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AI_BAD_RESPONSE": {
+                    "summary": "AI_BAD_RESPONSE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_BAD_RESPONSE",
+                      "message": "The AI returned an invalid response. Please try again."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/chat/sessions/{session_id}/messages/stream": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Send a message (SSE stream)",
+        "description": "Same multipart input. Responds with `text/event-stream` events: `user_message` (ChatMessage), `tool` ({name, summary}) per tool call, `delta` ({text}) chunks, then `done` (final saved ChatMessage) or `error` ({code, message}). Validation errors (empty message, bad image, unknown session) are returned as normal JSON envelopes before the stream starts. Use fetch + ReadableStream (EventSource can't POST multipart).",
+        "operationId": "send_message_stream_api_v1_chat_sessions__session_id__messages_stream_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_send_message_stream_api_v1_chat_sessions__session_id__messages_stream_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSE stream",
+            "content": {
+              "text/event-stream": {
+                "example": "event: user_message\ndata: {\"id\": \"…\", \"role\": \"user\", \"content\": \"How did I do?\"}\n\nevent: tool\ndata: {\"name\": \"get_daily_intake\", \"summary\": \"Checking today's intake…\"}\n\nevent: delta\ndata: {\"text\": \"So far today \"}\n\nevent: done\ndata: {\"id\": \"…\", \"role\": \"assistant\", \"content\": \"So far today …\"}\n\n"
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_FOUND",
+                      "message": "Scan not found."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "EMPTY_MESSAGE, INVALID_IMAGE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "EMPTY_MESSAGE": {
+                    "summary": "EMPTY_MESSAGE",
+                    "value": {
+                      "success": false,
+                      "code": "EMPTY_MESSAGE",
+                      "message": "Type a message or attach a photo."
+                    }
+                  },
+                  "INVALID_IMAGE": {
+                    "summary": "INVALID_IMAGE",
+                    "value": {
+                      "success": false,
+                      "code": "INVALID_IMAGE",
+                      "message": "The file is not a valid JPEG, PNG or WebP image."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "FILE_TOO_LARGE",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "FILE_TOO_LARGE": {
+                    "summary": "FILE_TOO_LARGE",
+                    "value": {
+                      "success": false,
+                      "code": "FILE_TOO_LARGE",
+                      "message": "Image is larger than 8 MB."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recipes/suggest": {
+      "post": {
+        "tags": [
+          "recipes"
+        ],
+        "summary": "Meal ideas from your ingredients",
+        "description": "Gemini suggests 1–5 meals the user can make with what they have, within their kitchen (`none`, `kettle`, `burner`), diet type and allergies. Nutrients are per serving and sanitised by the server.",
+        "operationId": "suggest_api_v1_recipes_suggest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeSuggestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_RecipeSuggestOut_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "success": false,
+                      "code": "UNAUTHORIZED",
+                      "message": "Missing or invalid access token."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "success": false,
+                      "code": "VALIDATION_ERROR",
+                      "message": "Some fields are invalid."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "AI_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "AI_UNAVAILABLE": {
+                    "summary": "AI_UNAVAILABLE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_UNAVAILABLE",
+                      "message": "The AI service is temporarily unavailable. Please try again."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "AI_BAD_RESPONSE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "AI_BAD_RESPONSE": {
+                    "summary": "AI_BAD_RESPONSE",
+                    "value": {
+                      "success": false,
+                      "code": "AI_BAD_RESPONSE",
+                      "message": "The AI returned an invalid response. Please try again."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_create_scan_api_v1_scans_post": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "Image",
+            "description": "JPEG, PNG or WebP, ≤ MAX_UPLOAD_MB"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Optional hint, e.g. 'hostel lunch'"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "breakfast",
+                  "lunch",
+                  "dinner",
+                  "snack"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type",
+            "description": "Defaults from local time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "Body_create_scan_api_v1_scans_post"
+      },
+      "Body_send_message_api_v1_chat_sessions__session_id__messages_post": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Required unless an image is attached; ≤ 2000 chars"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image",
+            "description": "Optional food photo (JPEG/PNG/WebP)"
+          }
+        },
+        "type": "object",
+        "title": "Body_send_message_api_v1_chat_sessions__session_id__messages_post"
+      },
+      "Body_send_message_stream_api_v1_chat_sessions__session_id__messages_stream_post": {
+        "properties": {
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Required unless an image is attached; ≤ 2000 chars"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image",
+            "description": "Optional food photo (JPEG/PNG/WebP)"
+          }
+        },
+        "type": "object",
+        "title": "Body_send_message_stream_api_v1_chat_sessions__session_id__messages_stream_post"
+      },
+      "ChatExchange": {
+        "properties": {
+          "user_message": {
+            "$ref": "#/components/schemas/ChatMessageOut"
+          },
+          "assistant_message": {
+            "$ref": "#/components/schemas/ChatMessageOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_message",
+          "assistant_message"
+        ],
+        "title": "ChatExchange"
+      },
+      "ChatMessageOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ToolCallTrace"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "ChatMessageOut",
+        "example": {
+          "content": "So far today you've had **1,250 kcal** of your 2,630 kcal target…",
+          "created_at": "2026-09-28T09:30:00Z",
+          "id": "c0ffee00-1111-4222-8333-444455556666",
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "args": {
+                "date": "2026-09-28"
+              },
+              "name": "get_daily_intake",
+              "summary": "Checked your intake for 2026-09-28"
+            }
+          ]
+        }
+      },
+      "ChatSessionCreate": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "scan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Id"
+          }
+        },
+        "type": "object",
+        "title": "ChatSessionCreate"
+      },
+      "ChatSessionDetail": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/ChatSessionOut"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageOut"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session",
+          "messages"
+        ],
+        "title": "ChatSessionDetail"
+      },
+      "ChatSessionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "scan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Id"
+          },
+          "last_message_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message Preview"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "scan_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ChatSessionOut"
+      },
+      "ChatSessionRename": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "ChatSessionRename"
+      },
+      "ClassifierInfo": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "predictions": {
+            "items": {
+              "$ref": "#/components/schemas/ClassifierPrediction"
+            },
+            "type": "array",
+            "title": "Predictions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "predictions"
+        ],
+        "title": "ClassifierInfo"
+      },
+      "ClassifierPrediction": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "display_name",
+          "score"
+        ],
+        "title": "ClassifierPrediction"
+      },
+      "DailyInsightOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "tips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tips"
+          },
+          "health_status": {
+            "type": "string",
+            "enum": [
+              "on_track",
+              "over",
+              "under",
+              "no_data"
+            ],
+            "title": "Health Status"
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer",
+            "default": "Estimates only — not medical advice."
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "headline",
+          "summary",
+          "tips",
+          "health_status"
+        ],
+        "title": "DailyInsightOut",
+        "example": {
+          "date": "2026-09-28",
+          "disclaimer": "Estimates only — not medical advice.",
+          "headline": "Solid start — protein needs a boost",
+          "health_status": "on_track",
+          "summary": "You're at 48% of your calories with lunch done. Protein is a bit low so far.",
+          "tips": [
+            "Add a katori of curd or sprouts to dinner.",
+            "Swap the evening samosa for roasted chana.",
+            "Drink a glass of water before each meal."
+          ]
+        }
+      },
+      "DailyIntakeOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "health_status": {
+            "type": "string",
+            "enum": [
+              "on_track",
+              "over",
+              "under",
+              "no_data"
+            ],
+            "title": "Health Status"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/IntakeEntryOut"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Nutrients"
+          },
+          "targets": {
+            "$ref": "#/components/schemas/Nutrients"
+          },
+          "remaining": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Remaining"
+          },
+          "percent_of_target": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Percent Of Target"
+          },
+          "status_flags": {
+            "items": {
+              "$ref": "#/components/schemas/StatusFlag"
+            },
+            "type": "array",
+            "title": "Status Flags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "health_status",
+          "entries",
+          "totals",
+          "targets",
+          "remaining",
+          "percent_of_target",
+          "status_flags"
+        ],
+        "title": "DailyIntakeOut"
+      },
+      "DaySummary": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Nutrients"
+          },
+          "calorie_percent": {
+            "type": "integer",
+            "title": "Calorie Percent"
+          },
+          "entries": {
+            "type": "integer",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "totals",
+          "calorie_percent",
+          "entries"
+        ],
+        "title": "DaySummary"
+      },
+      "DescribeIn": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 2,
+            "title": "Text"
+          },
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "breakfast",
+                  "lunch",
+                  "dinner",
+                  "snack"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          },
+          "log": {
+            "type": "boolean",
+            "title": "Log",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "DescribeIn",
+        "example": {
+          "log": false,
+          "meal_type": "dinner",
+          "text": "2 roti, dal and a glass of lassi"
+        }
+      },
+      "DescribeOut": {
+        "properties": {
+          "meal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Name"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FoodItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Nutrients"
+          },
+          "health": {
+            "$ref": "#/components/schemas/Health"
+          },
+          "intake_entry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntakeEntryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "meal_name",
+          "items",
+          "totals",
+          "health"
+        ],
+        "title": "DescribeOut"
+      },
+      "Envelope_ChatExchange_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatExchange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[ChatExchange]"
+      },
+      "Envelope_ChatSessionDetail_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatSessionDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[ChatSessionDetail]"
+      },
+      "Envelope_ChatSessionOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatSessionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[ChatSessionOut]"
+      },
+      "Envelope_DailyInsightOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DailyInsightOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[DailyInsightOut]"
+      },
+      "Envelope_DailyIntakeOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DailyIntakeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[DailyIntakeOut]"
+      },
+      "Envelope_DescribeOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DescribeOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[DescribeOut]"
+      },
+      "Envelope_HealthOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[HealthOut]"
+      },
+      "Envelope_IntakeEntryOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntakeEntryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[IntakeEntryOut]"
+      },
+      "Envelope_IntakeSummaryOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntakeSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[IntakeSummaryOut]"
+      },
+      "Envelope_MetaOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetaOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[MetaOut]"
+      },
+      "Envelope_NoneType_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "type": "null",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "title": "Envelope[NoneType]"
+      },
+      "Envelope_Page_ChatSessionOut__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_ChatSessionOut_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[Page[ChatSessionOut]]"
+      },
+      "Envelope_Page_IntakeEntryOut__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_IntakeEntryOut_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[Page[IntakeEntryOut]]"
+      },
+      "Envelope_Page_ScanSummary__": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_ScanSummary_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[Page[ScanSummary]]"
+      },
+      "Envelope_RecipeSuggestOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeSuggestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[RecipeSuggestOut]"
+      },
+      "Envelope_ScanResult_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScanResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[ScanResult]"
+      },
+      "Envelope_Suggestions_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Suggestions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[Suggestions]"
+      },
+      "Envelope_TargetsOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[TargetsOut]"
+      },
+      "Envelope_TokenOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[TokenOut]"
+      },
+      "Envelope_UserOut_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Envelope[UserOut]"
+      },
+      "ErrorEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": false
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "examples": [
+              "NOT_FOUND"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "examples": [
+              "Scan not found."
+            ]
+          },
+          "data": {
+            "type": "null",
+            "title": "Data"
+          },
+          "details": {
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorEnvelope"
+      },
+      "FoodItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "canonical_name": {
+            "type": "string",
+            "title": "Canonical Name"
+          },
+          "quantity_g": {
+            "type": "number",
+            "title": "Quantity G"
+          },
+          "serving_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serving Description"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "title": "Confidence"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "user_edit",
+              "user_added"
+            ],
+            "title": "Source"
+          },
+          "nutrients": {
+            "$ref": "#/components/schemas/Nutrients"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "canonical_name",
+          "quantity_g",
+          "confidence",
+          "source",
+          "nutrients"
+        ],
+        "title": "FoodItem"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Health": {
+        "properties": {
+          "score": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Score"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "good",
+              "moderate",
+              "needs_attention"
+            ],
+            "title": "Label"
+          },
+          "color": {
+            "type": "string",
+            "enum": [
+              "green",
+              "amber",
+              "red"
+            ],
+            "title": "Color"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/HealthFlag"
+            },
+            "type": "array",
+            "title": "Flags",
+            "default": []
+          },
+          "tips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tips",
+            "default": []
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer",
+            "default": "Estimates only — not medical advice."
+          }
+        },
+        "type": "object",
+        "required": [
+          "score",
+          "label",
+          "color"
+        ],
+        "title": "Health"
+      },
+      "HealthFlag": {
+        "properties": {
+          "nutrient": {
+            "type": "string",
+            "title": "Nutrient"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "high",
+              "low"
+            ],
+            "title": "Level"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "meal_target": {
+            "type": "number",
+            "title": "Meal Target"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nutrient",
+          "level",
+          "value",
+          "meal_target",
+          "message"
+        ],
+        "title": "HealthFlag"
+      },
+      "HealthLabelMeta": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "color": {
+            "type": "string",
+            "title": "Color"
+          },
+          "min_score": {
+            "type": "integer",
+            "title": "Min Score"
+          },
+          "max_score": {
+            "type": "integer",
+            "title": "Max Score"
+          },
+          "display": {
+            "type": "string",
+            "title": "Display"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "color",
+          "min_score",
+          "max_score",
+          "display"
+        ],
+        "title": "HealthLabelMeta"
+      },
+      "HealthOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "db": {
+            "type": "string",
+            "title": "Db"
+          },
+          "classifier": {
+            "type": "string",
+            "title": "Classifier"
+          },
+          "gemini": {
+            "type": "string",
+            "title": "Gemini"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "db",
+          "classifier",
+          "gemini",
+          "version"
+        ],
+        "title": "HealthOut"
+      },
+      "IntakeEntryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "scan",
+              "description",
+              "manual",
+              "chat"
+            ],
+            "title": "Source"
+          },
+          "scan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "meal_type": {
+            "type": "string",
+            "enum": [
+              "breakfast",
+              "lunch",
+              "dinner",
+              "snack"
+            ],
+            "title": "Meal Type"
+          },
+          "eaten_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Eaten At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FoodItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Nutrients"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "scan_id",
+          "name",
+          "meal_type",
+          "eaten_at",
+          "items",
+          "totals"
+        ],
+        "title": "IntakeEntryOut",
+        "example": {
+          "eaten_at": "2026-09-28T07:35:00Z",
+          "id": "9a8b7c6d-1111-4222-8333-444455556666",
+          "items": [],
+          "meal_type": "lunch",
+          "name": "Rajma Chawal Plate",
+          "scan_id": "6f1c2d5e-3a4b-4c8d-9e0f-1a2b3c4d5e6f",
+          "source": "scan",
+          "totals": {
+            "calories": 432.0,
+            "carbohydrates_g": 77.0,
+            "fat_g": 6.5,
+            "fiber_g": 10.6,
+            "protein_g": 15.1,
+            "saturated_fat_g": 1.1,
+            "sodium_mg": 545.0,
+            "sugar_g": 3.8
+          }
+        }
+      },
+      "IntakeSummaryOut": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/DaySummary"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "averages": {
+            "$ref": "#/components/schemas/Nutrients"
+          },
+          "days_logged": {
+            "type": "integer",
+            "title": "Days Logged"
+          },
+          "streak_days_logged": {
+            "type": "integer",
+            "title": "Streak Days Logged"
+          },
+          "top_foods": {
+            "items": {
+              "$ref": "#/components/schemas/TopFood"
+            },
+            "type": "array",
+            "title": "Top Foods"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "averages",
+          "days_logged",
+          "streak_days_logged",
+          "top_foods"
+        ],
+        "title": "IntakeSummaryOut"
+      },
+      "ItemEdit": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "quantity_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 5000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity G"
+          },
+          "remove": {
+            "type": "boolean",
+            "title": "Remove",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ItemEdit",
+        "description": "One edit. With `id`: change grams, rename, or `remove`. Without `id`: add a new item."
+      },
+      "LoginIn": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email",
+            "examples": [
+              "asha@example.com"
+            ]
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password",
+            "examples": [
+              "hostel-life-123"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginIn"
+      },
+      "ManualIntakeIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "meal_type": {
+            "type": "string",
+            "enum": [
+              "breakfast",
+              "lunch",
+              "dinner",
+              "snack"
+            ],
+            "title": "Meal Type"
+          },
+          "eaten_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eaten At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManualItemIn"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "meal_type",
+          "items"
+        ],
+        "title": "ManualIntakeIn",
+        "example": {
+          "items": [
+            {
+              "name": "Banana",
+              "nutrients": {
+                "calories": 107,
+                "carbohydrates_g": 27.4,
+                "fat_g": 0.4,
+                "fiber_g": 3.1,
+                "protein_g": 1.3,
+                "saturated_fat_g": 0.1,
+                "sodium_mg": 1,
+                "sugar_g": 14.7
+              },
+              "quantity_g": 120
+            }
+          ],
+          "meal_type": "snack",
+          "name": "Evening snack"
+        }
+      },
+      "ManualItemIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "quantity_g": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 5000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity G",
+            "description": "Optional; omit when only the numbers are known"
+          },
+          "serving_description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serving Description",
+            "examples": [
+              "1 plate"
+            ]
+          },
+          "nutrients": {
+            "$ref": "#/components/schemas/Nutrients"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "nutrients"
+        ],
+        "title": "ManualItemIn"
+      },
+      "MetaOut": {
+        "properties": {
+          "nutrients": {
+            "items": {
+              "$ref": "#/components/schemas/NutrientMeta"
+            },
+            "type": "array",
+            "title": "Nutrients"
+          },
+          "meal_types": {
+            "items": {
+              "$ref": "#/components/schemas/OptionMeta"
+            },
+            "type": "array",
+            "title": "Meal Types"
+          },
+          "diet_types": {
+            "items": {
+              "$ref": "#/components/schemas/OptionMeta"
+            },
+            "type": "array",
+            "title": "Diet Types"
+          },
+          "activity_levels": {
+            "items": {
+              "$ref": "#/components/schemas/OptionMeta"
+            },
+            "type": "array",
+            "title": "Activity Levels"
+          },
+          "goals": {
+            "items": {
+              "$ref": "#/components/schemas/OptionMeta"
+            },
+            "type": "array",
+            "title": "Goals"
+          },
+          "sexes": {
+            "items": {
+              "$ref": "#/components/schemas/OptionMeta"
+            },
+            "type": "array",
+            "title": "Sexes"
+          },
+          "health_labels": {
+            "items": {
+              "$ref": "#/components/schemas/HealthLabelMeta"
+            },
+            "type": "array",
+            "title": "Health Labels"
+          },
+          "meal_shares": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Meal Shares"
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer"
+          },
+          "max_upload_mb": {
+            "type": "number",
+            "title": "Max Upload Mb"
+          },
+          "accepted_image_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted Image Types"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nutrients",
+          "meal_types",
+          "diet_types",
+          "activity_levels",
+          "goals",
+          "sexes",
+          "health_labels",
+          "meal_shares",
+          "disclaimer",
+          "max_upload_mb",
+          "accepted_image_types"
+        ],
+        "title": "MetaOut"
+      },
+      "NutrientMeta": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "decimals": {
+            "type": "integer",
+            "title": "Decimals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "unit",
+          "kind",
+          "decimals"
+        ],
+        "title": "NutrientMeta"
+      },
+      "Nutrients": {
+        "properties": {
+          "calories": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Calories",
+            "description": "kcal",
+            "default": 0
+          },
+          "protein_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Protein G",
+            "default": 0
+          },
+          "carbohydrates_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Carbohydrates G",
+            "default": 0
+          },
+          "fat_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Fat G",
+            "default": 0
+          },
+          "saturated_fat_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Saturated Fat G",
+            "default": 0
+          },
+          "fiber_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Fiber G",
+            "default": 0
+          },
+          "sugar_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Sugar G",
+            "default": 0
+          },
+          "sodium_mg": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Sodium Mg",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "Nutrients",
+        "description": "Fixed nutrient keys. Units: kcal, grams, and milligrams for sodium.",
+        "example": {
+          "calories": 432.0,
+          "carbohydrates_g": 77.0,
+          "fat_g": 6.5,
+          "fiber_g": 10.6,
+          "protein_g": 15.1,
+          "saturated_fat_g": 1.1,
+          "sodium_mg": 545.0,
+          "sugar_g": 3.8
+        }
+      },
+      "OptionMeta": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "OptionMeta"
+      },
+      "Page_ChatSessionOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChatSessionOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "Page[ChatSessionOut]"
+      },
+      "Page_IntakeEntryOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IntakeEntryOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "Page[IntakeEntryOut]"
+      },
+      "Page_ScanSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScanSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "Page[ScanSummary]"
+      },
+      "ProfileOut": {
+        "properties": {
+          "age": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age"
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "male",
+                  "female",
+                  "other"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sex"
+          },
+          "height_cm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Cm"
+          },
+          "weight_kg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Kg"
+          },
+          "activity_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sedentary",
+                  "light",
+                  "moderate",
+                  "active",
+                  "very_active"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Level"
+          },
+          "goal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "lose",
+                  "maintain",
+                  "gain"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal"
+          },
+          "diet_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "veg",
+                  "eggetarian",
+                  "non_veg",
+                  "vegan"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diet Type"
+          },
+          "allergies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allergies",
+            "default": []
+          },
+          "conditions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Conditions",
+            "default": []
+          },
+          "country": {
+            "type": "string",
+            "title": "Country",
+            "default": "IN"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "default": "Asia/Kolkata"
+          }
+        },
+        "type": "object",
+        "title": "ProfileOut"
+      },
+      "ProfileUpdate": {
+        "properties": {
+          "age": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 13.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age"
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "male",
+                  "female",
+                  "other"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sex"
+          },
+          "height_cm": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 250.0,
+                "minimum": 80.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Cm"
+          },
+          "weight_kg": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 350.0,
+                "minimum": 20.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Kg"
+          },
+          "activity_level": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sedentary",
+                  "light",
+                  "moderate",
+                  "active",
+                  "very_active"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Level"
+          },
+          "goal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "lose",
+                  "maintain",
+                  "gain"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal"
+          },
+          "diet_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "veg",
+                  "eggetarian",
+                  "non_veg",
+                  "vegan"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diet Type"
+          },
+          "allergies": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allergies"
+          },
+          "conditions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2,
+                "minLength": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          }
+        },
+        "type": "object",
+        "title": "ProfileUpdate",
+        "description": "All fields optional; only the fields sent are changed.",
+        "example": {
+          "activity_level": "moderate",
+          "age": 20,
+          "allergies": [
+            "peanuts"
+          ],
+          "conditions": [],
+          "diet_type": "veg",
+          "goal": "maintain",
+          "height_cm": 175,
+          "sex": "male",
+          "weight_kg": 70
+        }
+      },
+      "RecipeOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "why": {
+            "type": "string",
+            "title": "Why"
+          },
+          "time_minutes": {
+            "type": "integer",
+            "title": "Time Minutes"
+          },
+          "kitchen": {
+            "type": "string",
+            "enum": [
+              "none",
+              "kettle",
+              "burner"
+            ],
+            "title": "Kitchen"
+          },
+          "ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ingredients"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "nutrients": {
+            "$ref": "#/components/schemas/Nutrients",
+            "description": "Per serving, sanitised by the server"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "why",
+          "time_minutes",
+          "kitchen",
+          "ingredients",
+          "steps",
+          "nutrients"
+        ],
+        "title": "RecipeOut"
+      },
+      "RecipeSuggestIn": {
+        "properties": {
+          "ingredients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Ingredients",
+            "examples": [
+              [
+                "poha",
+                "onion",
+                "peanuts"
+              ]
+            ]
+          },
+          "kitchen": {
+            "type": "string",
+            "enum": [
+              "none",
+              "kettle",
+              "burner"
+            ],
+            "title": "Kitchen",
+            "description": "Equipment available: none, kettle only, or a burner",
+            "default": "burner"
+          },
+          "count": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "description": "How many meal ideas to return",
+            "default": 3
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "examples": [
+              "high protein, under 15 minutes"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "ingredients"
+        ],
+        "title": "RecipeSuggestIn"
+      },
+      "RecipeSuggestOut": {
+        "properties": {
+          "meals": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeOut"
+            },
+            "type": "array",
+            "title": "Meals"
+          },
+          "ai_model": {
+            "type": "string",
+            "title": "Ai Model"
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meals",
+          "ai_model",
+          "disclaimer"
+        ],
+        "title": "RecipeSuggestOut"
+      },
+      "RegisterIn": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email",
+            "examples": [
+              "asha@example.com"
+            ]
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Password",
+            "examples": [
+              "hostel-life-123"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "examples": [
+              "Asha"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "name"
+        ],
+        "title": "RegisterIn"
+      },
+      "ScanHealthSummary": {
+        "properties": {
+          "score": {
+            "type": "integer",
+            "title": "Score"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "good",
+              "moderate",
+              "needs_attention"
+            ],
+            "title": "Label"
+          },
+          "color": {
+            "type": "string",
+            "enum": [
+              "green",
+              "amber",
+              "red"
+            ],
+            "title": "Color"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score",
+          "label",
+          "color"
+        ],
+        "title": "ScanHealthSummary"
+      },
+      "ScanItemsPatch": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemEdit"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ScanItemsPatch",
+        "example": {
+          "items": [
+            {
+              "id": "1d2c3b4a-0000-4000-8000-000000000001",
+              "quantity_g": 120
+            },
+            {
+              "id": "1d2c3b4a-0000-4000-8000-000000000002",
+              "name": "Jeera Rice"
+            },
+            {
+              "id": "1d2c3b4a-0000-4000-8000-000000000003",
+              "remove": true
+            },
+            {
+              "name": "Curd",
+              "quantity_g": 100
+            }
+          ]
+        }
+      },
+      "ScanLogIn": {
+        "properties": {
+          "meal_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "breakfast",
+                  "lunch",
+                  "dinner",
+                  "snack"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Type"
+          },
+          "eaten_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eaten At"
+          }
+        },
+        "type": "object",
+        "title": "ScanLogIn"
+      },
+      "ScanResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url"
+          },
+          "meal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Name"
+          },
+          "meal_type": {
+            "type": "string",
+            "enum": [
+              "breakfast",
+              "lunch",
+              "dinner",
+              "snack"
+            ],
+            "title": "Meal Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "classifier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClassifierInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FoodItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Nutrients"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Health"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ai_model": {
+            "type": "string",
+            "title": "Ai Model"
+          },
+          "logged_intake_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logged Intake Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "image_url",
+          "meal_name",
+          "meal_type",
+          "description",
+          "classifier",
+          "items",
+          "totals",
+          "health",
+          "ai_model",
+          "logged_intake_id",
+          "created_at"
+        ],
+        "title": "ScanResult",
+        "example": {
+          "ai_model": "gemini-3.8-flash",
+          "classifier": {
+            "model": "nateraw/food",
+            "predictions": [
+              {
+                "display_name": "Chicken Curry",
+                "label": "chicken_curry",
+                "score": 0.62
+              },
+              {
+                "display_name": "Samosa",
+                "label": "samosa",
+                "score": 0.11
+              },
+              {
+                "display_name": "Falafel",
+                "label": "falafel",
+                "score": 0.05
+              }
+            ]
+          },
+          "created_at": "2026-09-28T07:30:00Z",
+          "description": "hostel lunch",
+          "health": {
+            "color": "green",
+            "disclaimer": "Estimates only — not medical advice.",
+            "flags": [],
+            "label": "good",
+            "score": 93,
+            "tips": [
+              "Add a bowl of curd or a boiled egg for extra protein.",
+              "Great fibre from the rajma — keep the salad!"
+            ]
+          },
+          "id": "6f1c2d5e-3a4b-4c8d-9e0f-1a2b3c4d5e6f",
+          "image_url": "http://localhost:8000/media/2026/09/0b7e3c2a-5d1f-4e8a-9c3b-2f6d7e8a9b0c.jpg",
+          "items": [
+            {
+              "canonical_name": "kidney_bean_curry",
+              "confidence": "high",
+              "id": "1d2c3b4a-0000-4000-8000-000000000001",
+              "name": "Rajma",
+              "nutrients": {
+                "calories": 215.0,
+                "carbohydrates_g": 30.0,
+                "fat_g": 6.0,
+                "fiber_g": 9.0,
+                "protein_g": 10.5,
+                "saturated_fat_g": 1.0,
+                "sodium_mg": 480.0,
+                "sugar_g": 1.5
+              },
+              "quantity_g": 150.0,
+              "serving_description": "1 katori (~150 g)",
+              "source": "ai"
+            }
+          ],
+          "meal_name": "Rajma Chawal Plate",
+          "meal_type": "lunch",
+          "status": "completed",
+          "totals": {
+            "calories": 432.0,
+            "carbohydrates_g": 77.0,
+            "fat_g": 6.5,
+            "fiber_g": 10.6,
+            "protein_g": 15.1,
+            "saturated_fat_g": 1.1,
+            "sodium_mg": 545.0,
+            "sugar_g": 3.8
+          }
+        }
+      },
+      "ScanSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "rejected"
+            ],
+            "title": "Status"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url"
+          },
+          "meal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Name"
+          },
+          "meal_type": {
+            "type": "string",
+            "enum": [
+              "breakfast",
+              "lunch",
+              "dinner",
+              "snack"
+            ],
+            "title": "Meal Type"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ScanTotalsSummary"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScanHealthSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "image_url",
+          "meal_name",
+          "meal_type",
+          "totals",
+          "health",
+          "created_at"
+        ],
+        "title": "ScanSummary"
+      },
+      "ScanTotalsSummary": {
+        "properties": {
+          "calories": {
+            "type": "number",
+            "title": "Calories"
+          }
+        },
+        "type": "object",
+        "required": [
+          "calories"
+        ],
+        "title": "ScanTotalsSummary"
+      },
+      "StatusFlag": {
+        "properties": {
+          "nutrient": {
+            "type": "string",
+            "title": "Nutrient"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "high",
+              "low"
+            ],
+            "title": "Level"
+          },
+          "percent": {
+            "type": "integer",
+            "title": "Percent"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nutrient",
+          "level",
+          "percent",
+          "message"
+        ],
+        "title": "StatusFlag"
+      },
+      "Suggestions": {
+        "properties": {
+          "suggestions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Suggestions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suggestions"
+        ],
+        "title": "Suggestions"
+      },
+      "TargetsOut": {
+        "properties": {
+          "calories": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Calories",
+            "description": "kcal",
+            "default": 0
+          },
+          "protein_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Protein G",
+            "default": 0
+          },
+          "carbohydrates_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Carbohydrates G",
+            "default": 0
+          },
+          "fat_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Fat G",
+            "default": 0
+          },
+          "saturated_fat_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Saturated Fat G",
+            "default": 0
+          },
+          "fiber_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Fiber G",
+            "default": 0
+          },
+          "sugar_g": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Sugar G",
+            "default": 0
+          },
+          "sodium_mg": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Sodium Mg",
+            "default": 0
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "profile",
+              "default"
+            ],
+            "title": "Basis"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "bmr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bmr"
+          },
+          "tdee": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tdee"
+          },
+          "goal_nutrients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Goal Nutrients"
+          },
+          "limit_nutrients": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limit Nutrients"
+          }
+        },
+        "type": "object",
+        "required": [
+          "basis",
+          "explanation",
+          "goal_nutrients",
+          "limit_nutrients"
+        ],
+        "title": "TargetsOut",
+        "description": "Daily targets. Goal nutrients: calories, protein, carbs, fat, fibre. Limits: sat fat, sugar, sodium.",
+        "example": {
+          "calories": 432.0,
+          "carbohydrates_g": 77.0,
+          "fat_g": 6.5,
+          "fiber_g": 10.6,
+          "protein_g": 15.1,
+          "saturated_fat_g": 1.1,
+          "sodium_mg": 545.0,
+          "sugar_g": 3.8
+        }
+      },
+      "TokenOut": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "const": "bearer",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "user"
+        ],
+        "title": "TokenOut"
+      },
+      "ToolCallTrace": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "args": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Args",
+            "default": {}
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "summary"
+        ],
+        "title": "ToolCallTrace"
+      },
+      "TopFood": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "TopFood"
+      },
+      "UserOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileOut"
+          },
+          "onboarding_complete": {
+            "type": "boolean",
+            "title": "Onboarding Complete"
+          },
+          "is_guest": {
+            "type": "boolean",
+            "title": "Is Guest",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "name",
+          "profile",
+          "onboarding_complete"
+        ],
+        "title": "UserOut"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "JWT from /auth/login or /auth/register",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "Health check and UI metadata (no auth)."
+    },
+    {
+      "name": "auth",
+      "description": "Register and log in (JWT bearer tokens, 7-day expiry)."
+    },
+    {
+      "name": "users",
+      "description": "Profile and computed daily targets."
+    },
+    {
+      "name": "scans",
+      "description": "Food scanner: upload, view, edit portions, tips, log to intake."
+    },
+    {
+      "name": "intake",
+      "description": "Meal logging, daily totals vs targets, multi-day summary."
+    },
+    {
+      "name": "insights",
+      "description": "AI-written daily insight over server-computed numbers."
+    },
+    {
+      "name": "chat",
+      "description": "NutriBuddy chatbot: sessions, text + image messages, SSE streaming."
+    },
+    {
+      "name": "recipes",
+      "description": "Gemini meal ideas from the ingredients you have."
+    }
+  ]
+}

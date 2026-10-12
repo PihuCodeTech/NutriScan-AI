@@ -1,0 +1,16 @@
+{
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Some fields are invalid.",
+  "data": null,
+  "details": [
+    {
+      "loc": [
+        "body",
+        "text"
+      ],
+      "msg": "String should have at least 2 characters",
+      "type": "string_too_short"
+    }
+  ]
+}

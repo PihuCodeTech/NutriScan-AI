@@ -1,0 +1,187 @@
+{
+  "success": true,
+  "code": "OK",
+  "message": "OK",
+  "data": {
+    "nutrients": [
+      {
+        "key": "calories",
+        "label": "Calories",
+        "unit": "kcal",
+        "kind": "goal",
+        "decimals": 0
+      },
+      {
+        "key": "protein_g",
+        "label": "Protein",
+        "unit": "g",
+        "kind": "goal",
+        "decimals": 1
+      },
+      {
+        "key": "carbohydrates_g",
+        "label": "Carbohydrates",
+        "unit": "g",
+        "kind": "goal",
+        "decimals": 1
+      },
+      {
+        "key": "fat_g",
+        "label": "Fat",
+        "unit": "g",
+        "kind": "goal",
+        "decimals": 1
+      },
+      {
+        "key": "saturated_fat_g",
+        "label": "Saturated fat",
+        "unit": "g",
+        "kind": "limit",
+        "decimals": 1
+      },
+      {
+        "key": "fiber_g",
+        "label": "Fibre",
+        "unit": "g",
+        "kind": "goal",
+        "decimals": 1
+      },
+      {
+        "key": "sugar_g",
+        "label": "Sugar",
+        "unit": "g",
+        "kind": "limit",
+        "decimals": 1
+      },
+      {
+        "key": "sodium_mg",
+        "label": "Sodium",
+        "unit": "mg",
+        "kind": "limit",
+        "decimals": 0
+      }
+    ],
+    "meal_types": [
+      {
+        "value": "breakfast",
+        "label": "Breakfast"
+      },
+      {
+        "value": "lunch",
+        "label": "Lunch"
+      },
+      {
+        "value": "dinner",
+        "label": "Dinner"
+      },
+      {
+        "value": "snack",
+        "label": "Snack"
+      }
+    ],
+    "diet_types": [
+      {
+        "value": "veg",
+        "label": "Vegetarian"
+      },
+      {
+        "value": "eggetarian",
+        "label": "Eggetarian"
+      },
+      {
+        "value": "non_veg",
+        "label": "Non-vegetarian"
+      },
+      {
+        "value": "vegan",
+        "label": "Vegan"
+      }
+    ],
+    "activity_levels": [
+      {
+        "value": "sedentary",
+        "label": "Sedentary (little or no exercise)"
+      },
+      {
+        "value": "light",
+        "label": "Light (1–3 days/week)"
+      },
+      {
+        "value": "moderate",
+        "label": "Moderate (3–5 days/week)"
+      },
+      {
+        "value": "active",
+        "label": "Active (6–7 days/week)"
+      },
+      {
+        "value": "very_active",
+        "label": "Very active (hard exercise or physical job)"
+      }
+    ],
+    "goals": [
+      {
+        "value": "lose",
+        "label": "Lose weight"
+      },
+      {
+        "value": "maintain",
+        "label": "Maintain"
+      },
+      {
+        "value": "gain",
+        "label": "Gain weight / muscle"
+      }
+    ],
+    "sexes": [
+      {
+        "value": "male",
+        "label": "Male"
+      },
+      {
+        "value": "female",
+        "label": "Female"
+      },
+      {
+        "value": "other",
+        "label": "Other / prefer not to say"
+      }
+    ],
+    "health_labels": [
+      {
+        "label": "good",
+        "color": "green",
+        "min_score": 75,
+        "max_score": 100,
+        "display": "Good"
+      },
+      {
+        "label": "moderate",
+        "color": "amber",
+        "min_score": 50,
+        "max_score": 74,
+        "display": "Moderate"
+      },
+      {
+        "label": "needs_attention",
+        "color": "red",
+        "min_score": 0,
+        "max_score": 49,
+        "display": "Needs attention"
+      }
+    ],
+    "meal_shares": {
+      "breakfast": 0.25,
+      "lunch": 0.35,
+      "dinner": 0.3,
+      "snack": 0.1
+    },
+    "disclaimer": "Estimates only — not medical advice.",
+    "max_upload_mb": 8.0,
+    "accepted_image_types": [
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "success": true,
+  "code": "REGISTERED",
+  "message": "Account created",
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMzBhYzNhNi1iMzM2LTQwMGItYThhMy1mNGU5ZmM3ZWY2NGIiLCJpYXQiOjE3OTA1OTE4MDUsImV4cCI6MTc5MTE5NjYwNX0.M38oNHpKzVdaDhJ1HLVmODN35oW4sz52k-Ud649IoIo",
+    "token_type": "bearer",
+    "user": {
+      "id": "130ac3a6-b336-400b-a8a3-f4e9fc7ef64b",
+      "email": "asha@example.com",
+      "name": "Asha",
+      "profile": {
+        "age": null,
+        "sex": null,
+        "height_cm": null,
+        "weight_kg": null,
+        "activity_level": null,
+        "goal": null,
+        "diet_type": null,
+        "allergies": [],
+        "conditions": [],
+        "country": "IN",
+        "timezone": "Asia/Kolkata"
+      },
+      "onboarding_complete": false
+    }
+  }
+}

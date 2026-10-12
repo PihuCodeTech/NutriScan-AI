@@ -1,0 +1,187 @@
+{
+  "success": true,
+  "code": "DESCRIPTION_ANALYSED",
+  "message": "Meal estimated and logged",
+  "data": {
+    "meal_name": "Roti & Dal & Lassi",
+    "items": [
+      {
+        "id": "3aae4f24-83c3-4a25-9bae-e5f85270ef9c",
+        "name": "Roti",
+        "canonical_name": "roti",
+        "quantity_g": 80.0,
+        "serving_description": "2 serving(s) (~80 g)",
+        "confidence": "high",
+        "source": "ai",
+        "nutrients": {
+          "calories": 211.0,
+          "protein_g": 6.8,
+          "carbohydrates_g": 36.8,
+          "fat_g": 4.2,
+          "saturated_fat_g": 0.8,
+          "fiber_g": 5.2,
+          "sugar_g": 1.2,
+          "sodium_mg": 280.0
+        }
+      },
+      {
+        "id": "4800267d-86fb-4ca5-b6d8-847747626cad",
+        "name": "Dal",
+        "canonical_name": "dal",
+        "quantity_g": 150.0,
+        "serving_description": "1 typical serving (assumed, ~150 g)",
+        "confidence": "high",
+        "source": "ai",
+        "nutrients": {
+          "calories": 165.0,
+          "protein_g": 9.0,
+          "carbohydrates_g": 21.0,
+          "fat_g": 5.1,
+          "saturated_fat_g": 0.9,
+          "fiber_g": 5.2,
+          "sugar_g": 1.5,
+          "sodium_mg": 420.0
+        }
+      },
+      {
+        "id": "249afde8-3aca-45af-b149-e2fe8721e6ba",
+        "name": "Lassi",
+        "canonical_name": "lassi",
+        "quantity_g": 250.0,
+        "serving_description": "1 serving(s) (~250 g)",
+        "confidence": "high",
+        "source": "ai",
+        "nutrients": {
+          "calories": 225.0,
+          "protein_g": 7.8,
+          "carbohydrates_g": 32.5,
+          "fat_g": 7.2,
+          "saturated_fat_g": 4.5,
+          "fiber_g": 0.0,
+          "sugar_g": 30.0,
+          "sodium_mg": 112.0
+        }
+      }
+    ],
+    "totals": {
+      "calories": 601.0,
+      "protein_g": 23.6,
+      "carbohydrates_g": 90.3,
+      "fat_g": 16.5,
+      "saturated_fat_g": 6.2,
+      "fiber_g": 10.4,
+      "sugar_g": 32.7,
+      "sodium_mg": 812.0
+    },
+    "health": {
+      "score": 70,
+      "label": "moderate",
+      "color": "amber",
+      "flags": [
+        {
+          "nutrient": "sodium_mg",
+          "level": "high",
+          "value": 812.0,
+          "meal_target": 600.0,
+          "message": "High in salt for one meal"
+        },
+        {
+          "nutrient": "sugar_g",
+          "level": "high",
+          "value": 32.7,
+          "meal_target": 13.3,
+          "message": "Sugary"
+        },
+        {
+          "nutrient": "saturated_fat_g",
+          "level": "high",
+          "value": 6.2,
+          "meal_target": 5.9,
+          "message": "High in saturated fat"
+        }
+      ],
+      "tips": [
+        "Add a katori of curd or sprouts for protein.",
+        "Include a fruit or salad for fibre."
+      ],
+      "disclaimer": "Estimates only — not medical advice."
+    },
+    "intake_entry": {
+      "id": "d6ce971e-a89f-4a1b-a689-501ae696a603",
+      "source": "description",
+      "scan_id": null,
+      "name": "Roti & Dal & Lassi",
+      "meal_type": "dinner",
+      "eaten_at": "2026-09-28T10:36:45.454197Z",
+      "items": [
+        {
+          "id": "3aae4f24-83c3-4a25-9bae-e5f85270ef9c",
+          "name": "Roti",
+          "canonical_name": "roti",
+          "quantity_g": 80.0,
+          "serving_description": "2 serving(s) (~80 g)",
+          "confidence": "high",
+          "source": "ai",
+          "nutrients": {
+            "calories": 211.0,
+            "protein_g": 6.8,
+            "carbohydrates_g": 36.8,
+            "fat_g": 4.2,
+            "saturated_fat_g": 0.8,
+            "fiber_g": 5.2,
+            "sugar_g": 1.2,
+            "sodium_mg": 280.0
+          }
+        },
+        {
+          "id": "4800267d-86fb-4ca5-b6d8-847747626cad",
+          "name": "Dal",
+          "canonical_name": "dal",
+          "quantity_g": 150.0,
+          "serving_description": "1 typical serving (assumed, ~150 g)",
+          "confidence": "high",
+          "source": "ai",
+          "nutrients": {
+            "calories": 165.0,
+            "protein_g": 9.0,
+            "carbohydrates_g": 21.0,
+            "fat_g": 5.1,
+            "saturated_fat_g": 0.9,
+            "fiber_g": 5.2,
+            "sugar_g": 1.5,
+            "sodium_mg": 420.0
+          }
+        },
+        {
+          "id": "249afde8-3aca-45af-b149-e2fe8721e6ba",
+          "name": "Lassi",
+          "canonical_name": "lassi",
+          "quantity_g": 250.0,
+          "serving_description": "1 serving(s) (~250 g)",
+          "confidence": "high",
+          "source": "ai",
+          "nutrients": {
+            "calories": 225.0,
+            "protein_g": 7.8,
+            "carbohydrates_g": 32.5,
+            "fat_g": 7.2,
+            "saturated_fat_g": 4.5,
+            "fiber_g": 0.0,
+            "sugar_g": 30.0,
+            "sodium_mg": 112.0
+          }
+        }
+      ],
+      "totals": {
+        "calories": 601.0,
+        "protein_g": 23.6,
+        "carbohydrates_g": 90.3,
+        "fat_g": 16.5,
+        "saturated_fat_g": 6.2,
+        "fiber_g": 10.4,
+        "sugar_g": 32.7,
+        "sodium_mg": 812.0
+      }
+    }
+  }
+}

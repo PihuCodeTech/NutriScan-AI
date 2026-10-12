@@ -1,0 +1,65 @@
+"""Async engine, session factory and the `get_db` dependency."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Any
+
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+
+_engine: AsyncEngine | None = None
+_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+
+def _enable_sqlite_fks(dbapi_conn: Any, _: Any) -> None:
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+def init_engine(url: str) -> AsyncEngine:
+    """Create (or replace) the global engine and session factory."""
+    global _engine, _sessionmaker
+    kwargs: dict[str, Any] = {"pool_pre_ping": True}
+    if url.startswith("sqlite"):
+        kwargs = {"connect_args": {"timeout": 30}}
+    _engine = create_async_engine(url, **kwargs)
+    if url.startswith("sqlite"):
+        event.listen(_engine.sync_engine, "connect", _enable_sqlite_fks)
+    _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False, autoflush=False)
+    return _engine
+
+
+def get_engine() -> AsyncEngine:
+    if _engine is None:
+        from app.core.config import get_settings
+
+        init_engine(get_settings().DATABASE_URL)
+    assert _engine is not None
+    return _engine
+
+
+def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
+    if _sessionmaker is None:
+        get_engine()
+    assert _sessionmaker is not None
+    return _sessionmaker
+
+
+async def dispose_engine() -> None:
+    global _engine, _sessionmaker
+    if _engine is not None:
+        await _engine.dispose()
+    _engine = None
+    _sessionmaker = None
+
+
+async def get_db() -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency: one session per request; rolled back on error."""
+    async with get_sessionmaker()() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise

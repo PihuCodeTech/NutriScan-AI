@@ -1,0 +1,64 @@
+{
+  "success": true,
+  "code": "OK",
+  "message": "OK",
+  "data": {
+    "session": {
+      "id": "18361dc1-2a76-45b3-a7c6-3ed3b371293d",
+      "title": "How did I do today?",
+      "scan_id": "47af6ca0-d296-4454-bd68-ecd40486b56a",
+      "last_message_preview": "Done! I've logged **Banana** (~115 kcal) to your snack. Anything else?",
+      "created_at": "2026-09-28T10:36:45.485154Z",
+      "updated_at": "2026-09-28T10:36:45.508372Z"
+    },
+    "messages": [
+      {
+        "id": "9b5ed734-3993-458c-9b2d-b63af242cbae",
+        "role": "user",
+        "content": "How did I do today?",
+        "image_url": null,
+        "tool_calls": null,
+        "created_at": "2026-09-28T10:36:45.491087Z"
+      },
+      {
+        "id": "9df1b2aa-fd5b-48a1-9d95-f565bb3f30b1",
+        "role": "assistant",
+        "content": "So far today you've had about **1166 kcal** of your 1770 kcal target, with 46 g protein.\n- Add curd, dal or eggs for protein\n- Keep dinner light and balanced",
+        "image_url": null,
+        "tool_calls": [
+          {
+            "name": "get_daily_intake",
+            "args": {},
+            "summary": "Checked your intake for 2026-09-28"
+          }
+        ],
+        "created_at": "2026-09-28T10:36:45.496521Z"
+      },
+      {
+        "id": "db0e682e-62e5-493a-8732-6f9d837fb243",
+        "role": "user",
+        "content": "log a banana as snack",
+        "image_url": null,
+        "tool_calls": null,
+        "created_at": "2026-09-28T10:36:45.501810Z"
+      },
+      {
+        "id": "d8385886-896b-4acf-abcf-0a3c4a268381",
+        "role": "assistant",
+        "content": "Done! I've logged **Banana** (~115 kcal) to your snack. Anything else?",
+        "image_url": null,
+        "tool_calls": [
+          {
+            "name": "log_meal",
+            "args": {
+              "description": "a banana",
+              "meal_type": "snack"
+            },
+            "summary": "Logged Banana to your snack"
+          }
+        ],
+        "created_at": "2026-09-28T10:36:45.508565Z"
+      }
+    ]
+  }
+}

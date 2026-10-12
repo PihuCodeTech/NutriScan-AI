@@ -1,0 +1,42 @@
+[project]
+name = "nutriscan-backend"
+version = "1.0.0"
+description = "NutriScan AI — AI food nutrition scanner and nutrition chatbot backend (FastAPI + Gemini)"
+requires-python = ">=3.11"
+readme = "README.md"
+
+# Runtime dependencies are pinned in requirements.txt (and requirements-dev.txt for tooling).
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "storage", "ml/output", "ml/data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+ignore = [
+    "B008",    # FastAPI's Depends()/File() in defaults is idiomatic
+    "RUF001",  # ambiguous unicode (we use "—" and "×" in user-facing strings)
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]
+"tests/*.py" = ["E501", "ASYNC240"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+markers = ["live: calls the real Gemini API (needs GEMINI_API_KEY and RUN_LIVE=1)"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["app"]
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+show_missing = false
+skip_covered = false

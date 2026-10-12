@@ -1,0 +1,10 @@
+{
+  "success": false,
+  "code": "NOT_FOOD",
+  "message": "No food detected in the image.",
+  "data": null,
+  "details": {
+    "scan_id": "6499520d-a9ca-4f99-bb87-cd6bb8898eea",
+    "reason": "The image does not appear to contain food."
+  }
+}

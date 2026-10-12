@@ -1,0 +1,33 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Data
+*.db
+*.db-journal
+storage/
+ml/output/
+ml/data/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Retired prototype (kept locally, not tracked)
+files (1)/
+
+# Local editor/runtime
+.claude/
+*.db-wal
+*.db-shm

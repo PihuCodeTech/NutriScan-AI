@@ -1,0 +1,26 @@
+{
+  "success": true,
+  "code": "OK",
+  "message": "OK",
+  "data": {
+    "id": "130ac3a6-b336-400b-a8a3-f4e9fc7ef64b",
+    "email": "asha@example.com",
+    "name": "Asha",
+    "profile": {
+      "age": 20,
+      "sex": "female",
+      "height_cm": 160.0,
+      "weight_kg": 55.0,
+      "activity_level": "light",
+      "goal": "maintain",
+      "diet_type": "veg",
+      "allergies": [
+        "peanuts"
+      ],
+      "conditions": [],
+      "country": "IN",
+      "timezone": "Asia/Kolkata"
+    },
+    "onboarding_complete": true
+  }
+}

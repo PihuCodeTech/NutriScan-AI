@@ -1,0 +1,116 @@
+{
+  "success": true,
+  "code": "SCAN_CREATED",
+  "message": "Food analysed",
+  "data": {
+    "id": "47af6ca0-d296-4454-bd68-ecd40486b56a",
+    "status": "completed",
+    "image_url": "http://localhost:8000/media/2026/09/92a98457-2d55-4477-9402-1c9823e57624.jpg",
+    "meal_name": "Rajma Chawal Plate",
+    "meal_type": "lunch",
+    "description": "hostel lunch",
+    "classifier": {
+      "model": "nateraw/food",
+      "predictions": [
+        {
+          "label": "chicken_curry",
+          "display_name": "Chicken Curry",
+          "score": 0.62
+        },
+        {
+          "label": "samosa",
+          "display_name": "Samosa",
+          "score": 0.11
+        },
+        {
+          "label": "falafel",
+          "display_name": "Falafel",
+          "score": 0.05
+        }
+      ]
+    },
+    "items": [
+      {
+        "id": "ce114a9e-03a3-4ff3-bd0b-b1d414ee77f6",
+        "name": "Rajma",
+        "canonical_name": "kidney_bean_curry",
+        "quantity_g": 150.0,
+        "serving_description": "1 katori (~150 g)",
+        "confidence": "high",
+        "source": "ai",
+        "nutrients": {
+          "calories": 215.0,
+          "protein_g": 10.5,
+          "carbohydrates_g": 30.0,
+          "fat_g": 6.0,
+          "saturated_fat_g": 1.0,
+          "fiber_g": 9.0,
+          "sugar_g": 1.5,
+          "sodium_mg": 480.0
+        }
+      },
+      {
+        "id": "9c000bb4-7db4-4014-9d7f-a86d08f70e5f",
+        "name": "Steamed Rice",
+        "canonical_name": "steamed_rice",
+        "quantity_g": 150.0,
+        "serving_description": "1 cup cooked (~150 g)",
+        "confidence": "high",
+        "source": "ai",
+        "nutrients": {
+          "calories": 195.0,
+          "protein_g": 4.0,
+          "carbohydrates_g": 42.0,
+          "fat_g": 0.4,
+          "saturated_fat_g": 0.1,
+          "fiber_g": 0.6,
+          "sugar_g": 0.1,
+          "sodium_mg": 5.0
+        }
+      },
+      {
+        "id": "434f9587-c7cd-4b20-b103-9b6175e36e70",
+        "name": "Onion Salad",
+        "canonical_name": "onion_salad",
+        "quantity_g": 50.0,
+        "serving_description": "small side (~50 g)",
+        "confidence": "medium",
+        "source": "ai",
+        "nutrients": {
+          "calories": 22.0,
+          "protein_g": 0.6,
+          "carbohydrates_g": 5.0,
+          "fat_g": 0.1,
+          "saturated_fat_g": 0.0,
+          "fiber_g": 1.0,
+          "sugar_g": 2.2,
+          "sodium_mg": 60.0
+        }
+      }
+    ],
+    "totals": {
+      "calories": 432.0,
+      "protein_g": 15.1,
+      "carbohydrates_g": 77.0,
+      "fat_g": 6.5,
+      "saturated_fat_g": 1.1,
+      "fiber_g": 10.6,
+      "sugar_g": 3.8,
+      "sodium_mg": 545.0
+    },
+    "health": {
+      "score": 93,
+      "label": "good",
+      "color": "green",
+      "flags": [],
+      "tips": [
+        "Add a bowl of curd or a boiled egg for extra protein.",
+        "Great fibre from the rajma — keep the salad and go easy on extra salt."
+      ],
+      "disclaimer": "Estimates only — not medical advice."
+    },
+    "ai_model": "mock-gemini",
+    "logged_intake_id": null,
+    "created_at": "2026-09-28T10:36:45.374338Z"
+  }
+}

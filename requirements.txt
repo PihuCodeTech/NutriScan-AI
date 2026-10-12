@@ -1,0 +1,22 @@
+# Runtime dependencies (Python 3.11+).
+# PyTorch: install the CPU wheel first, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+email-validator>=2.1
+sqlalchemy[asyncio]>=2.0.30
+aiosqlite>=0.20
+asyncpg>=0.29
+alembic>=1.13
+pyjwt>=2.8
+bcrypt>=4.1
+python-multipart>=0.0.9
+pillow>=10.3
+google-genai>=1.30
+transformers>=4.44
+torch>=2.3
+slowapi>=0.1.9
+anyio>=4.4
+tzdata>=2024.1

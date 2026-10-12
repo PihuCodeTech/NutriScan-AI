@@ -1,0 +1,147 @@
+"""Application settings, loaded from environment variables and `.env`."""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from dotenv import dotenv_values
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+APP_VERSION = "1.0.0"
+DISCLAIMER = "Estimates only — not medical advice."
+
+# The project folder (the one holding `.env`, `app/`, `frontend/`). `.env` and relative paths are resolved
+# against it, so the server finds its key, database and frontend whatever directory it is started from.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = PROJECT_ROOT / ".env"
+
+# Settings worth warning about when a value exported in the shell silently overrides `.env`.
+_WATCHED_ENV = ("GEMINI_API_KEY", "GEMINI_USE_VERTEX", "GEMINI_MODEL", "GEMINI_FALLBACK_MODEL", "MOCK_AI")
+
+
+def _under_root(value: str) -> str:
+    path = Path(value).expanduser()
+    return str(path if path.is_absolute() else (PROJECT_ROOT / path).resolve())
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
+
+    # App
+    APP_ENV: Literal["dev", "test", "prod"] = "dev"
+    LOG_LEVEL: str = "INFO"
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
+    CORS_ORIGINS: str = "*"
+
+    # Database
+    DATABASE_URL: str = "sqlite+aiosqlite:///./nutriscan.db"
+
+    # Auth
+    JWT_SECRET: str = "dev-insecure-secret-change-me"
+    JWT_EXPIRE_MINUTES: int = 10080
+
+    # Gemini
+    GEMINI_API_KEY: str = ""
+    GEMINI_USE_VERTEX: bool = False
+    GEMINI_MODEL: str = "gemini-3.8-flash"
+    GEMINI_FALLBACK_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_TIMEOUT_S: float = 30.0
+    # Gemini 3 "thinking" depth: minimal | low | medium | high, or empty for the model default.
+    # Low keeps scans and chat quick; models that don't support the setting simply ignore it here.
+    GEMINI_THINKING_LEVEL: str = "low"
+
+    # Mock mode
+    MOCK_AI: bool = False
+
+    # Classifier
+    CLASSIFIER_ENABLED: bool = True
+    CLASSIFIER_MODEL_ID: str = "nateraw/food"
+    CLASSIFIER_TOP_K: int = 3
+
+    # Uploads
+    MAX_UPLOAD_MB: float = 8
+    STORAGE_DIR: str = "./storage/uploads"
+
+    # Web frontend served at /app (skipped if the folder doesn't exist)
+    FRONTEND_DIR: str = "./frontend"
+
+    # Limits
+    RATE_LIMIT_AI: str = "20/minute"
+    CHAT_HISTORY_TURNS: int = 20
+    CHAT_MAX_TOOL_ROUNDS: int = 4
+
+    @field_validator("PUBLIC_BASE_URL")
+    @classmethod
+    def _strip_slash(cls, v: str) -> str:
+        return v.rstrip("/")
+
+    @field_validator("GEMINI_API_KEY")
+    @classmethod
+    def _clean_key(cls, v: str) -> str:
+        # Pasted keys often carry stray spaces or quotes, which Google rejects as an invalid key.
+        return v.strip().strip("'\"").strip()
+
+    @field_validator("GEMINI_THINKING_LEVEL")
+    @classmethod
+    def _thinking_level(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in {"", "minimal", "low", "medium", "high"}:
+            raise ValueError("GEMINI_THINKING_LEVEL must be minimal, low, medium, high or empty")
+        return v
+
+    @field_validator("STORAGE_DIR", "FRONTEND_DIR")
+    @classmethod
+    def _resolve_dir(cls, v: str) -> str:
+        return _under_root(v) if v else v
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _resolve_sqlite_path(cls, v: str) -> str:
+        """`sqlite+aiosqlite:///./nutriscan.db` → absolute path under the project folder."""
+        prefix, sep, path = v.partition(":///")
+        if not sep or not prefix.startswith("sqlite") or not path or path.startswith(":memory:"):
+            return v
+        return v if Path(path).is_absolute() else f"{prefix}:///{_under_root(path)}"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()] or ["*"]
+
+    @property
+    def max_upload_bytes(self) -> int:
+        return int(self.MAX_UPLOAD_MB * 1024 * 1024)
+
+    @property
+    def gemini_status(self) -> str:
+        if self.MOCK_AI:
+            return "mock"
+        return "configured" if self.GEMINI_API_KEY else "missing"
+
+
+def shell_overrides() -> list[str]:
+    """Names of watched settings whose shell environment value differs from (and overrides) `.env`."""
+    if not ENV_FILE.is_file():
+        return []
+    file_values = dotenv_values(ENV_FILE)
+    return [
+        name
+        for name in _WATCHED_ENV
+        if name in os.environ and name in file_values and os.environ[name] != (file_values[name] or "")
+    ]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the process-wide settings instance."""
+    settings = Settings()
+    if settings.APP_ENV == "prod" and settings.JWT_SECRET in {
+        "dev-insecure-secret-change-me",
+        "change-me-to-a-long-random-string",
+        "",
+    }:
+        raise RuntimeError("JWT_SECRET must be set to a strong random value when APP_ENV=prod")
+    return settings
