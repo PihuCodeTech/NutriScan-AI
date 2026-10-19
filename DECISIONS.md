@@ -175,3 +175,19 @@ within each section.
   rather than added as `0002`. A fresh `alembic upgrade head` (e.g. on the new Postgres) creates everything.
   An existing local `nutriscan.db` created before this pass should be deleted so it is recreated with the new
   schema (it only held demo/test data).
+- **Supabase TLS is verified, not skipped.** The Supavisor pooler's certificate chains to Supabase's own root CA,
+  which is not in the system trust store. Rather than disabling verification, `certs/supabase-ca.crt` (Supabase's
+  public "Supabase Root 2021 CA", valid to 2031) is bundled and trusted alongside the system CAs, with hostname
+  checking on. `DATABASE_URL` accepts the connection string as Supabase shows it (`postgres://` / `postgresql://`
+  become `postgresql+asyncpg://`) and rejects an `https://<ref>.supabase.co` project URL with a clear message.
+- **Postgres connections are pooled (was `NullPool`).** Opening a TLS connection to Supabase costs ~6 round trips;
+  from India to the Sydney pooler (~410 ms RTT) that was ~2.7 s added to every request. A small pool
+  (`pool_size=5`, `pool_recycle=240` s, below Supavisor's idle timeout) cut a warm health check from ~5 s to
+  ~0.8 s and a scan from ~22 s to ~14 s. `statement_cache_size=0` stays so the transaction pooler (6543) works.
+- **A per-day Gemini quota 429 skips the same-model retry** and goes straight to the fallback model; a per-minute
+  429 is still retried once.
+- **Supabase's Data API is locked out (migration `0002`).** Supabase serves the `public` schema over PostgREST to
+  anyone with the project's public anon key; with RLS off, every table (including `users`) was readable that way.
+  The backend never uses that API and connects as `postgres` (BYPASSRLS), so `0002` enables RLS with no policies
+  on every public table and revokes `anon`/`authenticated` privileges, including default privileges for future
+  tables. It is a no-op on SQLite and on Postgres without Supabase's roles.
