@@ -65,11 +65,11 @@ const LEVELS = ['Newcomer', 'Mess regular', 'Home cook', 'Streak keeper', 'Kitch
 
 // Every badge stays unlocked once earned. Streak badges must have ids that start with "s" (the rewards page relies on it).
 const BADGES = [
-  { id: 's3', name: '3-day streak', icon: '🌱', desc: 'Go 3 days without street food', goal: 3, of: c => c.streak, test: c => c.streak >= 3 },
-  { id: 's7', name: '7-day streak', icon: '🔥', desc: 'Go a full week without street food', goal: 7, of: c => c.streak, test: c => c.streak >= 7 },
-  { id: 's14', name: '14-day streak', icon: '🏆', desc: 'Go two weeks without street food', goal: 14, of: c => c.streak, test: c => c.streak >= 14 },
-  { id: 'h1', name: 'First swap', icon: '🍳', desc: 'Cook a home swap and log it', goal: 1, of: c => c.home, test: c => c.home >= 1 },
-  { id: 'l1', name: 'Label reader', icon: '🏷️', desc: 'Scan a product label', goal: 1, of: c => c.labelScans, test: c => c.labelScans >= 1 },
+  { id: 's3', name: '3-day streak', icon: 'sprout', desc: 'Go 3 days without street food', goal: 3, of: c => c.streak, test: c => c.streak >= 3 },
+  { id: 's7', name: '7-day streak', icon: 'flame', desc: 'Go a full week without street food', goal: 7, of: c => c.streak, test: c => c.streak >= 7 },
+  { id: 's14', name: '14-day streak', icon: 'trophy', desc: 'Go two weeks without street food', goal: 14, of: c => c.streak, test: c => c.streak >= 14 },
+  { id: 'h1', name: 'First swap', icon: 'cook', desc: 'Cook a home swap and log it', goal: 1, of: c => c.home, test: c => c.home >= 1 },
+  { id: 'l1', name: 'Label reader', icon: 'tag', desc: 'Scan a product label', goal: 1, of: c => c.labelScans, test: c => c.labelScans >= 1 },
 ];
 
 const KITCHENS = { none: 'No cooking', kettle: 'Kettle only', burner: 'Induction or gas burner' };
