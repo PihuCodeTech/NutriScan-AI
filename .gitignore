@@ -24,9 +24,6 @@ ml/data/
 .idea/
 .vscode/
 
-# Retired prototype (kept locally, not tracked)
-files (1)/
-
 # Local editor/runtime
 .claude/
 *.db-wal
