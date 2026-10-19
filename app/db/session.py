@@ -8,7 +8,8 @@ from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
+
+from app.core.config import PROJECT_ROOT
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
@@ -22,10 +23,23 @@ def _enable_sqlite_fks(dbapi_conn: Any, _: Any) -> None:
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", ""}
 
+# Supabase's pooler presents a chain signed by Supabase's own root CA, which is not in the system trust store.
+_SUPABASE_CA = PROJECT_ROOT / "certs" / "supabase-ca.crt"
+
+
+def _tls_context() -> ssl.SSLContext:
+    """Verified TLS (certificate + hostname): the system CAs plus the bundled Supabase root CA."""
+    ctx = ssl.create_default_context()
+    if _SUPABASE_CA.is_file():
+        ctx.load_verify_locations(cafile=str(_SUPABASE_CA))
+    return ctx
+
 
 def _engine_kwargs(url: str) -> dict[str, Any]:
     """Driver-specific engine settings. Supabase (managed Postgres over the Supavisor pooler) needs TLS and
-    no prepared-statement caching; a connection pooler in front means we let it pool and open per request.
+    no prepared-statement caching (transaction mode, port 6543, can't keep them). Connections are kept in a
+    small pool: opening one costs ~6 network round trips (TCP + TLS + auth), seconds on a far-away region.
+    They are recycled well before Supavisor's idle timeout, so a stale one is never handed out.
     SSL is used automatically for remote hosts (Supabase) and skipped for a local Postgres."""
     if url.startswith("sqlite"):
         return {"connect_args": {"timeout": 30}}
@@ -35,8 +49,8 @@ def _engine_kwargs(url: str) -> dict[str, Any]:
         host = (make_url(url).host or "").lower()
         connect_args: dict[str, Any] = {"statement_cache_size": 0}
         if host not in _LOCAL_HOSTS:  # Supabase and other remote Postgres require TLS
-            connect_args["ssl"] = ssl.create_default_context()
-        return {"poolclass": NullPool, "connect_args": connect_args}
+            connect_args["ssl"] = _tls_context()
+        return {"pool_size": 5, "max_overflow": 5, "pool_recycle": 240, "connect_args": connect_args}
     return {"pool_pre_ping": True}
 
 
