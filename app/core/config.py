@@ -103,7 +103,17 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL")
     @classmethod
     def _resolve_sqlite_path(cls, v: str) -> str:
-        """`sqlite+aiosqlite:///./nutriscan.db` → absolute path under the project folder."""
+        """`sqlite+aiosqlite:///./nutriscan.db` → absolute path under the project folder.
+        Plain `postgres://` / `postgresql://` (as Supabase shows them) → `postgresql+asyncpg://`."""
+        if v.startswith(("http://", "https://")):
+            raise ValueError(
+                "DATABASE_URL must be a database connection string, not an HTTP URL. For Supabase use "
+                "Project Settings → Database → Connection string (URI), e.g. "
+                "postgresql+asyncpg://postgres.<ref>:<password>@<host>.pooler.supabase.com:6543/postgres"
+            )
+        for plain in ("postgres://", "postgresql://"):
+            if v.startswith(plain):
+                return "postgresql+asyncpg://" + v[len(plain):]
         prefix, sep, path = v.partition(":///")
         if not sep or not prefix.startswith("sqlite") or not path or path.startswith(":memory:"):
             return v
