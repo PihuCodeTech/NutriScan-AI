@@ -97,6 +97,18 @@ async def test_retry_on_429_then_primary_succeeds():
     assert client.last_model_used == "primary-model"
 
 
+async def test_daily_quota_429_goes_straight_to_fallback():
+    fixture = rajma_chawal_fixture()
+    daily = genai_errors.ClientError(
+        429,
+        {"error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED",
+                   "details": [{"violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}},
+    )
+    client, models = _client({"primary-model": [daily], "fallback-model": [_resp(parsed=fixture)]})
+    await client.estimate_from_text("rice", user_ctx="")
+    assert models.calls == ["primary-model", "fallback-model"]
+
+
 async def test_timeout_then_fallback(monkeypatch):
     async def slow(**_: Any) -> Any:
         await asyncio.sleep(5)
