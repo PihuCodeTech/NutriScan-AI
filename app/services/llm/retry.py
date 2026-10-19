@@ -42,7 +42,8 @@ def classify(exc: BaseException) -> str:
         return "fallback" if exc.code == 504 else "retry"  # 504 DEADLINE_EXCEEDED = slow model
     if isinstance(exc, genai_errors.ClientError):
         if exc.code == 429:
-            return "retry"
+            # A per-day quota won't come back in 1.5 s; a per-minute one might.
+            return "fallback" if "perday" in str(exc).lower() else "retry"
         if is_key_problem(exc):
             return "fatal"  # the fallback model would reject the same key
         if exc.code in (400, 404):
