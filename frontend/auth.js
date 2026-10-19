@@ -37,19 +37,20 @@ window.onSessionExpired = () => {
 
 function loginMarkup() {
   return `<div class="login-card" role="dialog" aria-modal="true" aria-labelledby="login-title">
-    <h2 id="login-title">ScanMyFood</h2>
-    <p>Photograph a meal or a nutrition label and see its estimated calories, nutrients and salt/sugar/fibre patterns, with budget-friendly swaps. Sign in to keep your meals on every device, or continue as a guest: the AI scanner and chat work the same way.</p>
+    <div class="login-brand"><span class="brand-mark" aria-hidden="true"></span><h2 id="login-title">ScanMyFood</h2></div>
+    <p class="login-lead">Photograph a meal or a nutrition label and see its estimated calories, nutrients and salt/sugar/fibre patterns, with budget-friendly swaps. Sign in to keep your meals on every device, or continue as a guest: the AI scanner and chat work the same way.</p>
     <form id="lg-form">
-      <label>Email<input id="lg-email" type="email" autocomplete="email" required></label>
-      <label>Password<input id="lg-pass" type="password" autocomplete="current-password" minlength="8" required></label>
-      <label id="lg-name-row" hidden>Your name<input id="lg-name" type="text" autocomplete="name" maxlength="100"></label>
-      <label class="lg-keep"><input id="lg-keep" type="checkbox"> Keep me signed in on this device</label>
+      <label class="field">Email<input id="lg-email" type="email" autocomplete="email" required></label>
+      <label class="field">Password<input id="lg-pass" type="password" autocomplete="current-password" minlength="8" required></label>
+      <label class="field" id="lg-name-row" hidden>Your name<input id="lg-name" type="text" autocomplete="name" maxlength="100"></label>
+      <label class="check"><input id="lg-keep" type="checkbox"> Keep me signed in on this device</label>
       <div class="login-row"><button class="btn" type="submit" data-mode="in">Sign in</button>
-      <button class="btn alt" type="submit" data-mode="up">Create account</button></div>
+      <button class="btn secondary" type="submit" data-mode="up">Create account</button></div>
     </form>
     <p id="login-msg" role="alert" class="login-msg"></p>
-    <button class="btn ghost-ink" id="lg-guest" type="button">Continue as guest</button>
-    <p class="sub small">Guest sessions end when you close this tab. Create an account to keep your meals.</p>
+    <div class="or" aria-hidden="true"><span>or</span></div>
+    <button class="btn secondary wide" id="lg-guest" type="button">Continue as guest</button>
+    <p class="sub small login-note">Guest sessions end when you close this tab. Create an account to keep your meals.</p>
   </div>`;
 }
 
@@ -76,12 +77,13 @@ function showLogin(onDone, startMessage) {
   document.getElementById('lg-guest').onclick = async () => {
     msg('');
     buttons().forEach(b => { b.disabled = true; });
+    busyButton(document.getElementById('lg-guest'), true, 'Starting…');
     try {
       const r = await authRequest(endpoint('guest'), {});
       saveSession(r, false);
       finish(r.user);
     } catch (e) { msg('Could not start a guest session. ' + reasonFor(e)); }
-    finally { buttons().forEach(b => { b.disabled = false; }); }
+    finally { busyButton(document.getElementById('lg-guest'), false); buttons().forEach(b => { b.disabled = false; }); }
   };
   document.getElementById('lg-form').onsubmit = async ev => {
     ev.preventDefault(); msg('');
@@ -91,6 +93,7 @@ function showLogin(onDone, startMessage) {
     if (create && nameRow.hidden) { nameRow.hidden = false; nameBox.focus(); return msg('Add your name, then choose "Create account" again.'); }
     const name = nameBox.value.trim() || email.split('@')[0];
     buttons().forEach(b => { b.disabled = true; });
+    busyButton(ev.submitter, true, create ? 'Creating…' : 'Signing in…');
     try {
       const r = create
         ? await authRequest(endpoint('register'), { email, password, name })
@@ -103,7 +106,7 @@ function showLogin(onDone, startMessage) {
         msg(field === 'password' ? 'Use a password with at least 8 characters.' : field === 'email' ? 'Enter a valid email address.' : e.serverMessage);
       } else if (e.code === 'EMAIL_TAKEN') msg('That email already has an account. Choose "Sign in".');
       else msg(reasonFor(e));
-    } finally { buttons().forEach(b => { b.disabled = false; }); }
+    } finally { busyButton(ev.submitter, false); buttons().forEach(b => { b.disabled = false; }); }
   };
   document.getElementById('lg-email').focus();
 }
