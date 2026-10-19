@@ -34,11 +34,80 @@ function toast(text) {
   toastTimer = setTimeout(() => t.remove(), 3200);
 }
 
+// ---------- Icons ----------
+// One line-icon family (24 px grid, 1.75 stroke, round caps), drawn here so the app needs no icon font.
+const ICONS = {
+  home: '<path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v10.5a1 1 0 0 0 1 1h3.5v-6h4v6h3.5a1 1 0 0 0 1-1V9"/>',
+  camera: '<path d="M4 8.5a2 2 0 0 1 2-2h1.8l1.5-2.2h5.4l1.5 2.2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><circle cx="12" cy="13" r="3.4"/>',
+  history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.4"/><path d="M3.5 3.8v4.6h4.6"/><path d="M12 7.5V12l3 2"/>',
+  cook: '<path d="M4 11h13v1.5a6 6 0 0 1-6 6h-1a6 6 0 0 1-6-6Z"/><path d="M17 12.5h3.5"/><path d="M8.5 4.5c-.8 1 .8 2 0 3.5M12.5 4.5c-.8 1 .8 2 0 3.5"/>',
+  award: '<circle cx="12" cy="9" r="5.5"/><path d="m8.7 13.6-1.4 6.9 4.7-2.6 4.7 2.6-1.4-6.9"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/>',
+  sprout: '<path d="M12 20.5V12"/><path d="M12 12c0-4 2.8-6.8 7.5-6.8 0 4-2.8 6.8-7.5 6.8Z"/><path d="M12 14.5c0-3-2.3-5.2-6.5-5.2 0 3 2.3 5.2 6.5 5.2Z"/>',
+  flame: '<path d="M12 21c3.9 0 6.5-2.6 6.5-6.3 0-3-1.8-5.3-3.7-7.2-.4 1.8-1.3 3-2.5 3.6.3-3.2-1.1-6.1-4.1-7.8.3 3.1-1.5 5-2.6 6.8A7.6 7.6 0 0 0 5.5 14.7C5.5 18.4 8.1 21 12 21Z"/>',
+  trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0Z"/><path d="M8 6H5.5a2.8 2.8 0 0 0 2.8 3.8M16 6h2.5a2.8 2.8 0 0 1-2.8 3.8"/><path d="M12 13v3.5"/><path d="M9 20.5h6l-.7-4h-4.6Z"/>',
+  tag: '<path d="M3.5 12V4.5a1 1 0 0 1 1-1H12l8.5 8.5-8.5 8.5Z"/><circle cx="8" cy="8" r="1.4"/>',
+  check: '<path d="m5 12.5 4.3 4.3L19 7.3"/>',
+  alert: '<path d="M10.3 4.3 2.9 17.5A2 2 0 0 0 4.6 20.5h14.8a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><path d="M12 17h.01"/>',
+  info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><path d="M12 7.8h.01"/>',
+  image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 15.5-4.8-4.8-9.2 8.8"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  download: '<path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/>',
+  send: '<path d="M4.5 11.5 20 4l-6.5 16-2.6-6.4Z"/><path d="m10.9 13.6 4.6-4.6"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  trash: '<path d="M4.5 7h15"/><path d="M9.5 7V4.5h5V7"/><path d="m6.5 7 .9 12.5h9.2L17.5 7"/>',
+  swap: '<path d="M7 4.5 3.5 8 7 11.5"/><path d="M3.5 8h13"/><path d="m17 12.5 3.5 3.5-3.5 3.5"/><path d="M20.5 16h-13"/>',
+};
+const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
+document.querySelectorAll('[data-icon]').forEach(el => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)));
+
+// ---------- Loading indicators ----------
+// AI calls take 10–40 s. A spinning circle, a seconds counter and what the AI is doing right now show that the
+// page is still working. Each step is [seconds elapsed, message].
+const LOADING_STEPS = {
+  scan: [[0, 'Uploading your photo…'], [3, 'Spotting each item on the plate…'], [10, 'Estimating portions and nutrients…'],
+    [25, 'Adding up the totals and writing tips…'], [45, 'Still working. The AI is busy right now; this can take up to a minute.']],
+  ideas: [[0, 'Finding meals you can make…'], [15, 'Checking them against your diet and kitchen…'],
+    [45, 'Still working. The AI is busy right now; this can take up to a minute.']],
+};
+const loadingStep = (kind, since) => {
+  const s = (Date.now() - since) / 1000;
+  return LOADING_STEPS[kind].filter(([at]) => s >= at).pop()[1];
+};
+const loadingTime = since => `${Math.floor((Date.now() - since) / 1000)} s`;
+
+function loadingHtml(kind, since) {
+  return `<div class="loading" role="status" data-kind="${kind}" data-since="${since}">
+    <span class="spinner big" aria-hidden="true"></span>
+    <div><b class="loading-msg">${esc(loadingStep(kind, since))}</b><small class="loading-time">${loadingTime(since)}</small></div></div>`;
+}
+
+// One ticker updates every loading card on screen, so it keeps going if the page is re-rendered meanwhile.
+setInterval(() => document.querySelectorAll('.loading[data-since]').forEach(el => {
+  const since = +el.dataset.since;
+  el.querySelector('.loading-msg').textContent = loadingStep(el.dataset.kind, since);
+  el.querySelector('.loading-time').textContent = loadingTime(since);
+}), 1000);
+
+// Puts a small spinner in a button while it waits; call again with on=false to restore it.
+function busyButton(btn, on, label) {
+  if (!btn) return;
+  if (on) {
+    btn.dataset.idle = btn.dataset.idle ?? btn.innerHTML;
+    btn.innerHTML = `<span class="spinner" aria-hidden="true"></span>${esc(label || btn.textContent)}`;
+  } else if (btn.dataset.idle !== undefined) {
+    btn.innerHTML = btn.dataset.idle;
+    delete btn.dataset.idle;
+  }
+  btn.disabled = on;
+  btn.setAttribute('aria-busy', on);
+}
+
 // ---------- State (saved per person in localStorage) ----------
 const DEFAULT_PROFILE = { name: '', age: 20, sex: 'other', weight: 65, height: 170, activity: 'light', goal: 2000, goalDir: 'maintain', diet: 'Vegetarian', kitchen: 'burner' };
 let state;
-let scan = { file: null, url: '', mode: 'meal', result: null, chat: [], added: false, busy: false };
-let cook = { pantry: '', results: null, busy: false, focus: '' };
+let scan = { file: null, url: '', mode: 'meal', result: null, chat: [], added: false, busy: false, since: 0 };
+let cook = { pantry: '', results: null, busy: false, since: 0, focus: '' };
 let ui = { histFilter: 'all' };
 // Numbers the server owns (goals and the street-free streak), so the UI agrees with the AI. null = not loaded.
 let serverTargets = null, serverStreak = null;
@@ -188,10 +257,12 @@ function bodyImpact() {
 }
 
 // ---------- Pieces of UI ----------
+// A tray compartment that fills up like a serving: the level shows how much of today's goal is eaten.
 function cell(label, value, goal, unit, tone) {
   const pct = Math.min(100, Math.round(value / goal * 100));
   return `<div class="cell ${value > goal ? 'over' : ''}" style="--fill:${pct}%;--tone:${tone}">
-    <small>${label}</small><b>${Math.round(value)}${unit}</b><small>of ${goal}${unit}</small></div>`;
+    <span class="cell-label">${label}</span><b class="num">${Math.round(value)}<span class="unit">${unit}</span></b>
+    <span class="cell-goal">of ${goal}${unit} · ${Math.round(value / goal * 100)}%</span></div>`;
 }
 
 function weekChart() {
@@ -201,25 +272,25 @@ function weekChart() {
     const list = state.meals.filter(m => sameDay(m.at, d));
     return { label: new Date(d).toLocaleDateString('en', { weekday: 'short' }), cal: sum(list, 'cal'), street: list.some(m => m.street) };
   });
-  const top = Math.max(goal, ...days.map(d => d.cal));
-  const bars = days.map((d, i) => {
-    const h = d.cal / top * 100;
-    return `<rect x="${i * 50 + 8}" y="${110 - h}" width="34" height="${h}" rx="3" fill="${d.street ? 'var(--chili)' : 'var(--leaf)'}"><title>${d.label}: ${Math.round(d.cal)} kcal${d.street ? ', street food' : ''}</title></rect>
-      <text x="${i * 50 + 25}" y="130" text-anchor="middle" font-size="11" fill="currentColor">${d.label}</text>`;
-  }).join('');
-  const gy = 110 - goal / top * 100;
-  return `<svg viewBox="0 0 350 140" class="chart" role="img" aria-label="Calories over the last 7 days. Red bars are days with street food. Dashed line is your goal of ${goal} kcal.">
-    ${bars}<line x1="0" x2="350" y1="${gy}" y2="${gy}" stroke="currentColor" stroke-dasharray="4 4" opacity=".45"/></svg>`;
+  const top = Math.max(goal, ...days.map(d => d.cal)) * 1.12;  // headroom for the value labels
+  const cols = days.map(d => `<div class="bar-col" title="${d.label}: ${Math.round(d.cal)} kcal${d.street ? ', street food' : ''}">
+      ${d.cal ? `<small class="bar-v num">${Math.round(d.cal)}</small>` : ''}<span class="bar ${d.street ? 'street' : ''}" style="height:${d.cal / top * 100}%"></span></div>`).join('');
+  const empty = days.every(d => !d.cal)
+    ? '<p class="chart-empty">No meals logged in the last 7 days. Scan or log a meal and it shows up here.</p>' : '';
+  const summary = days.map(d => `${d.label} ${Math.round(d.cal)} kcal${d.street ? ' (street food)' : ''}`).join(', ');
+  return `<div class="bars" role="img" aria-label="Calories over the last 7 days against your goal of ${goal} kcal: ${summary}.">
+    <div class="bars-plot" aria-hidden="true"><span class="goal-line" style="bottom:${goal / top * 100}%"></span>${cols}${empty}</div>
+    <div class="bars-x" aria-hidden="true">${days.map(d => `<span>${d.label}</span>`).join('')}</div></div>`;
 }
 
 const dots = streak => `<div class="dots" aria-hidden="true">${[...Array(7)].map((_, i) => `<i class="${i < streak ? 'full' : ''}"></i>`).join('')}</div>`;
 
 function impactHtml() {
   const rows = bodyImpact();
-  if (!rows) return '<p class="sub">Log at least 3 meals this week to see your salt, sugar, fibre and fried-food patterns.</p>';
+  if (!rows) return `<div class="empty-inline">${icon('info')}<p>Log at least 3 meals this week to see your salt, sugar, fibre and fried-food patterns.</p></div>`;
   const word = ['On track', 'Watch', 'High'], tone = ['var(--leaf)', 'var(--turmeric)', 'var(--chili)'], fill = [28, 64, 100];
-  return `<div class="tray impact">${rows.map(r => `<div class="cell ${r.level === null ? 'nodata' : ''}" style="--fill:${r.level === null ? 0 : fill[r.level]}%;--tone:${r.level === null ? '#ccc' : tone[r.level]}">
-      <small>${r.label}</small><b>${r.level === null ? 'No data' : word[r.level]}</b><small>this week</small></div>`).join('')}</div>
+  return `<div class="tray impact">${rows.map(r => `<div class="cell ${r.level === null ? 'nodata' : ''}" style="--fill:${r.level === null ? 0 : fill[r.level]}%;--tone:${r.level === null ? 'var(--line-strong)' : tone[r.level]}">
+      <span class="cell-label">${r.label}</span><b>${r.level === null ? 'No data' : word[r.level]}</b><span class="cell-goal">this week</span></div>`).join('')}</div>
     <ul class="reasons">${rows.map(r => `<li><b>${r.label}.</b> ${esc(r.text)}</li>`).join('')}</ul>
     <p class="sub small">Patterns from the meals you logged this week — general guidance, not medical advice. Log every meal for a fairer picture.</p>`;
 }
@@ -228,26 +299,31 @@ function impactHtml() {
 function dashboard() {
   const today = todayMeals(), tg = targets(), streak = streakDays();
   const name = state.profile.name ? ', ' + esc(state.profile.name) : '';
-  const sample = state.sample ? `<div class="banner">These are sample meals so the dashboard is not empty. <button class="btn small" data-act="clearMeals">Clear sample data and start fresh</button></div>` : '';
-  return `${sample}<h2>Today${name}</h2><p class="sub">${new Date().toLocaleDateString('en', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-  <div class="tray" role="group" aria-label="Today's nutrition against your goals">
+  const sample = state.sample ? `<div class="banner">${icon('info')}<div>These are sample meals so the dashboard is not empty. <button class="btn small secondary" data-act="clearMeals">Clear sample data and start fresh</button></div></div>` : '';
+  return `${sample}<header class="page-head"><div><h2>Today${name}</h2><p class="sub">${new Date().toLocaleDateString('en', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
+    <button class="btn accent" data-page="scan">${icon('camera')}Scan a meal</button></header>
+  <section class="tray" role="group" aria-label="Today's nutrition against your goals">
     ${cell('Calories', sum(today, 'cal'), tg.cal, ' kcal', 'var(--turmeric)')}
     ${cell('Protein', sum(today, 'protein'), tg.protein, 'g', 'var(--leaf)')}
-    ${cell('Carbs', sum(today, 'carbs'), tg.carbs, 'g', '#8fb8d8')}
+    ${cell('Carbs', sum(today, 'carbs'), tg.carbs, 'g', 'var(--sky)')}
     ${cell('Fat', sum(today, 'fat'), tg.fat, 'g', 'var(--chili)')}
-  </div>
-  ${signedIn() ? '<div class="block ai-insight" id="ai-insight"><h3>Today\'s AI insight</h3><p class="sub" role="status">Loading…</p></div>' : ''}
-  <div class="block"><h3>Quick checks</h3><p class="sub small">Calculated from your log and goals. The AI insight is above.</p>${insights(today).map(i => `<p class="insight ${i.tone}">${esc(i.text)}</p>`).join('')}
-    <div class="actions"><button class="btn alt" data-page="scan">Scan a meal</button></div></div>
-  <div class="block split">
-    <div><h3>Last 7 days</h3>${weekChart()}<p class="sub">Red bars are days with street food.</p></div>
-    <div><h3>Street-free streak</h3><p class="big" style="font-size:2.4rem">${streak} ${streak === 1 ? 'day' : 'days'}</p>
+  </section>
+  <div class="dash-grid">
+    ${signedIn() ? `<section class="card ai-insight" id="ai-insight"><h3>Today's AI insight</h3>${skeleton(3)}</section>` : ''}
+    <section class="card streak-card"><h3>Street-free streak</h3><p class="big num">${streak} <span>${streak === 1 ? 'day' : 'days'}</span></p>
       ${dots(streak)}
       <p class="sub">${claimable() ? 'Your weekly reward is ready to claim.' : streak >= 7 ? 'Weekly reward claimed. Keep going for the next one.' : (7 - streak) + ' more days to your weekly reward.'}</p>
-      <button class="btn" data-page="rewards">See rewards</button></div>
-  </div>
-  <div class="block"><h3>This week's eating patterns</h3>${impactHtml()}</div>`;
+      <button class="btn secondary" data-page="rewards">See rewards</button></section>
+    <section class="card chart-card"><h3>Last 7 days</h3>${weekChart()}
+      <p class="legend"><span class="key leaf"></span>Calories <span class="key chili"></span>Street food day <span class="key goal"></span>Your goal</p></section>
+    <section class="card"><h3>Quick checks</h3><p class="sub small">Calculated from your log and goals.</p>
+      <ul class="checks">${insights(today).map(i => `<li class="${i.tone}">${icon({ warn: 'alert', good: 'check' }[i.tone] || 'info')}<span>${esc(i.text)}</span></li>`).join('')}</ul></section>
+    <section class="card wide"><h3>This week's eating patterns</h3>${impactHtml()}</section>
+  </div>`;
 }
+
+// Grey placeholder lines while text loads, so the card keeps its shape.
+const skeleton = lines => `<div class="skeleton" role="status" aria-label="Loading">${[...Array(lines)].map(() => '<span></span>').join('')}</div>`;
 
 function fitLine(f) {
   const tg = targets(), left = Math.round(tg.cal - sum(todayMeals(), 'cal'));
@@ -263,94 +339,106 @@ function healthHtml(f) {
   if (!h) return '';
   const tone = { green: 'var(--leaf)', amber: 'var(--turmeric)', red: 'var(--chili)' }[h.color] || 'var(--leaf)';
   const label = { good: 'Good', moderate: 'Moderate', needs_attention: 'Needs attention' }[h.label] || h.label;
-  return `<div class="score" style="--tone:${tone}"><b>${h.score}</b><span>/100</span><small>${esc(label)}</small></div>`;
+  return `<div class="score" style="--tone:${tone}" aria-label="Health score ${h.score} out of 100, ${esc(label)}"><b class="num">${h.score}</b><span>/100</span><small>${esc(label)}</small></div>`;
 }
 
 function itemsHtml(f) {
   if (!f.items || !f.items.length) return '';
-  const conf = { high: '', medium: ' <small class="conf">medium confidence</small>', low: ' <small class="conf low">low confidence</small>' };
-  const src = s => s === 'table' ? ' <small class="src-tag db" title="Nutrients from a curated food database (IFCT/USDA)">DB</small>' : ' <small class="src-tag ai" title="Nutrients estimated by the AI">AI est.</small>';
-  return `<h4>What is on the plate</h4><ul class="items">${f.items.map(i => `<li><span>${esc(i.name)}${conf[i.confidence] || ''}${src(i.nutritionSource)}<br><small>${esc(i.serving || i.grams + ' g')}</small></span><b>${i.cal} kcal</b></li>`).join('')}</ul>`;
+  const conf = { high: '', medium: ' <small class="pill warn">medium confidence</small>', low: ' <small class="pill bad">low confidence</small>' };
+  const src = s => s === 'table' ? ' <small class="pill ok" title="Nutrients from a curated food database (IFCT/USDA)">DB</small>' : ' <small class="pill" title="Nutrients estimated by the AI">AI est.</small>';
+  return `<h4>What is on the plate</h4><ul class="items">${f.items.map(i => `<li><span><span class="item-name">${esc(i.name)}</span>${conf[i.confidence] || ''}${src(i.nutritionSource)}<small>${esc(i.serving || i.grams + ' g')}</small></span><b class="num">${i.cal} kcal</b></li>`).join('')}</ul>`;
 }
 
 function resultHtml() {
   const f = scan.result;
-  if (f.error) return `<p class="banner warn">${esc(f.error)}</p>`;
-  const n = (label, v, unit) => `<div><small>${label}</small><b>${dash(v)}${has(v) ? unit : ''}</b></div>`;
+  if (f.error) return `<div class="banner warn" role="alert">${icon('alert')}<div>${esc(f.error)}</div></div>`;
+  const n = (label, v, unit) => `<div><small>${label}</small><b class="num">${dash(v)}${has(v) ? `<span class="unit">${unit}</span>` : ''}</b></div>`;
   const risk = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' };
   const guess = f.classifier?.predictions?.length
     ? `<p class="sub small">Image model's first guess: ${esc(f.classifier.predictions[0].display_name)} (${Math.round(f.classifier.predictions[0].score * 100)}%). The AI then checked every item on the plate.</p>` : '';
+  const list = (items, kind, none) => `<ul class="${kind}">${items.map(t => `<li>${icon(kind === 'tips' ? 'check' : 'alert')}<span>${esc(t)}</span></li>`).join('') || `<li class="none">${none}</li>`}</ul>`;
   const lists = f.health
-    ? `<div class="lists"><div><h4>Watch out</h4><ul>${f.cons.map(c => `<li>${esc(c)}</li>`).join('') || '<li>Nothing flagged for this meal</li>'}</ul></div>
-       <div><h4>Tips</h4><ul>${f.tips.map(t => `<li>${esc(t)}</li>`).join('') || '<li>No tips this time</li>'}</ul></div></div>
+    ? `<div class="lists"><div><h4>Watch out</h4>${list(f.cons, 'flags', 'Nothing flagged for this meal')}</div>
+       <div><h4>Tips</h4>${list(f.tips, 'tips', 'No tips this time')}</div></div>
        <p class="sub small">${esc(f.health.disclaimer || 'Estimates only — not medical advice.')}</p>`
-    : `<div class="lists"><div><h4>Advantages</h4><ul>${f.pros.map(p => `<li>${esc(p)}</li>`).join('') || '<li>None found</li>'}</ul></div>
-       <div><h4>Disadvantages</h4><ul>${f.cons.map(c => `<li>${esc(c)}</li>`).join('') || '<li>None found</li>'}</ul></div></div>`;
-  return `<div class="block"><div class="result-head"><h3>${esc(f.name)} <span class="tag ${f.street ? 'bad' : ''}">${f.street ? 'Street food' : 'Not street food'}</span></h3>${healthHtml(f)}</div>
+    : `<div class="lists"><div><h4>Advantages</h4>${list(f.pros, 'tips', 'None found')}</div>
+       <div><h4>Disadvantages</h4>${list(f.cons, 'flags', 'None found')}</div></div>`;
+  return `<article class="card result"><div class="result-head"><div><h3>${esc(f.name)}</h3><span class="tag ${f.street ? 'bad' : ''}">${f.street ? 'Street food' : 'Not street food'}</span></div>${healthHtml(f)}</div>
     <p class="fit">${fitLine(f)}</p>
     <div class="nutri">${n('Calories', f.cal, ' kcal')}${n('Protein', f.protein, 'g')}${n('Carbs', f.carbs, 'g')}${n('Fat', f.fat, 'g')}${n('Fibre', f.fibre, 'g')}${n('Sodium', f.sodium, 'mg')}${n('Sugar', f.sugar, 'g')}</div>
-    ${f.items ? itemsHtml(f) : `<p class="sub" style="margin:10px 0 0">${esc(f.summary)}</p>`}
+    ${f.items ? itemsHtml(f) : `<p class="sub">${esc(f.summary)}</p>`}
     ${guess}
     ${f.ingredients.length ? `<div class="chips" aria-label="Ingredients by risk">${f.ingredients.map(i => `<span class="chip ${i.risk}">${esc(i.name)}<small> ${risk[i.risk]}</small></span>`).join('')}</div>` : ''}
     ${lists}
-    <label class="check"><input type="checkbox" data-act="toggleStreet" ${f.street ? 'checked' : ''}> This is street food</label>
-    <div class="actions"><button class="btn alt" data-act="addMeal" ${scan.added ? 'disabled' : ''}>${scan.added ? 'Added to your log' : 'Add to my log'}</button>
-    <button class="btn" data-act="swapFor">Find a home swap</button></div></div>
-    <div class="block"><h3>Ask about this food</h3><div class="chat"><div class="msgs" id="msgs" aria-live="polite">${chatHtml()}</div>
+    <div class="result-foot"><label class="check"><input type="checkbox" data-act="toggleStreet" ${f.street ? 'checked' : ''}> This is street food</label>
+    <div class="actions"><button class="btn" data-act="addMeal" ${scan.added ? 'disabled' : ''}>${scan.added ? icon('check') + 'Added to your log' : icon('plus') + 'Add to my log'}</button>
+    <button class="btn secondary" data-act="swapFor">${icon('swap')}Find a home swap</button></div></div></article>
+    <section class="card chat-card"><h3>Ask about this food</h3><div class="chat"><div class="msgs" id="msgs" aria-live="polite">${chatHtml()}</div>
     <div class="chips">${['Is it bad for my liver?', 'Is this enough protein for me?', 'What can I eat instead?'].map(q => `<button class="chip btn-chip" data-act="ask" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
-    <div class="ask"><input id="q" placeholder="Is it bad for my skin or kidneys?" aria-label="Question about this food"><button class="btn" data-act="send">Ask</button></div></div></div>`;
+    <div class="ask"><input id="q" placeholder="Is it bad for my skin or kidneys?" aria-label="Question about this food"><button class="btn" data-act="send" aria-label="Ask">${icon('send')}<span class="ask-lbl">Ask</span></button></div></div></section>`;
 }
 
 function chatHtml() {
-  if (!scan.chat.length) return '<p class="sub">Ask about benefits, risks or healthier options.</p>';
-  return scan.chat.map(m => `<div class="msg ${m.me ? 'me' : ''} ${m.markdown ? 'md' : ''} ${m.error ? 'err' : ''}" ${m.error ? 'role="alert"' : ''}>${m.markdown ? md(m.text) : esc(m.text)}${(m.tools || []).map(t => `<small class="tool">✓ ${esc(t.summary)}</small>`).join('')}</div>`).join('');
+  if (!scan.chat.length) return '<p class="sub chat-empty">Ask about benefits, risks or healthier options.</p>';
+  return scan.chat.map(m => `<div class="msg ${m.me ? 'me' : ''} ${m.markdown ? 'md' : ''} ${m.error ? 'err' : ''} ${m.pending ? 'pending' : ''}" ${m.error ? 'role="alert"' : ''}>${m.pending ? '<span class="spinner" aria-hidden="true"></span>' : ''}${m.markdown ? md(m.text) : esc(m.text)}${(m.tools || []).map(t => `<small class="tool">${icon('check')}${esc(t.summary)}</small>`).join('')}</div>`).join('');
 }
 
+// What the result column shows before the first scan.
+const resultSlot = () => scan.busy ? loadingHtml('scan', scan.since) : scan.result ? resultHtml()
+  : `<div class="result-empty">${icon('image')}<p>Your results show up here: calories and nutrients for every item on the plate, a health score and tips.</p></div>`;
+
 function scanPage() {
-  return `<h2>Scan food</h2><p class="sub">Photograph a whole meal or the nutrition label on a packet.</p>
-  <fieldset class="mode"><legend class="sr">What are you scanning?</legend>
-    <label><input type="radio" name="mode" value="meal" ${scan.mode === 'meal' ? 'checked' : ''}>Whole meal</label>
-    <label><input type="radio" name="mode" value="label" ${scan.mode === 'label' ? 'checked' : ''}>Product label</label></fieldset>
-  <label class="meal-of-day">Which meal is this?
-    <select id="meal-type">
-      <option value="auto">Not sure / general</option>
-      <option value="breakfast">Breakfast</option>
-      <option value="lunch">Lunch</option>
-      <option value="dinner">Dinner</option>
-      <option value="snack">Snack</option>
-    </select>
-    <small class="sub">Used to score the plate against that meal's share of your day. "Not sure" scores it neutrally.</small>
-  </label>
-  <label class="drop"><input type="file" id="file" class="sr" accept="image/*"><span>Choose a photo, take one, or drop it here</span><small id="fname">${scan.file ? esc(scan.file.name) : 'JPG, PNG or WebP'}</small></label>
-  <img id="preview" class="preview" alt="Selected food" ${scan.url ? `src="${scan.url}"` : 'hidden'}>
-  <div class="actions"><button class="btn" data-act="analyze" id="analyze">Analyze</button></div>
-  <div id="result" aria-live="polite">${scan.result ? resultHtml() : ''}</div>`;
+  return `<header class="page-head"><div><h2>Scan food</h2><p class="sub">Photograph a whole meal or the nutrition label on a packet.</p></div></header>
+  <div class="scan-layout">
+  <section class="card scan-input">
+    <fieldset class="segmented"><legend class="sr">What are you scanning?</legend>
+      <label><input type="radio" name="mode" value="meal" ${scan.mode === 'meal' ? 'checked' : ''}><span>Whole meal</span></label>
+      <label><input type="radio" name="mode" value="label" ${scan.mode === 'label' ? 'checked' : ''}><span>Product label</span></label></fieldset>
+    <label class="field">Which meal is this?
+      <select id="meal-type">
+        <option value="auto">Not sure / general</option>
+        <option value="breakfast">Breakfast</option>
+        <option value="lunch">Lunch</option>
+        <option value="dinner">Dinner</option>
+        <option value="snack">Snack</option>
+      </select>
+      <small>Used to score the plate against that meal's share of your day. "Not sure" scores it neutrally.</small>
+    </label>
+    <label class="drop ${scan.url ? 'has-img' : ''}"><input type="file" id="file" class="sr" accept="image/*">
+      <img id="preview" class="preview" alt="Selected food" ${scan.url ? `src="${scan.url}"` : 'hidden'}>
+      <span class="drop-cta">${icon('camera')}<b class="drop-title">Choose a photo, take one, or drop it here</b><b class="drop-change">Choose another photo</b></span>
+      <small id="fname">${scan.file ? esc(scan.file.name) : 'JPG, PNG or WebP'}</small></label>
+    <button class="btn accent wide" data-act="analyze" id="analyze" ${scan.busy ? 'disabled aria-busy="true"' : ''}>${scan.busy ? '<span class="spinner" aria-hidden="true"></span>Analyzing…' : 'Analyze'}</button>
+  </section>
+  <div id="result" class="scan-output" aria-live="polite">${resultSlot()}</div>
+  </div>`;
 }
 
 function historyPage() {
   const all = [...state.meals].sort((a, b) => b.at - a.at);
   const list = all.filter(m => ui.histFilter === 'all' || (ui.histFilter === 'street' ? m.street : m.home));
-  let lastDay = '', body = '';
+  const groups = [];
   list.forEach(m => {
     const day = new Date(m.at).toDateString();
-    if (day !== lastDay) {
-      lastDay = day;
-      body += `<h3 class="day">${dateLabel(m.at)} <small>${Math.round(sum(all.filter(x => sameDay(x.at, m.at)), 'cal'))} kcal</small></h3>`;
-    }
-    body += `<div class="row"><div><b>${esc(m.name)}</b> ${m.street ? '<span class="tag bad">Street</span>' : ''}${m.home ? '<span class="tag">Home cooked</span>' : ''}
-      <small>${new Date(m.at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' })} · ${Math.round(m.cal)} kcal · protein ${m.protein}g · carbs ${m.carbs}g · fat ${m.fat}g</small></div>
-      <button class="btn ghost" data-act="remove" data-id="${esc(m.id)}" aria-label="Remove ${esc(m.name)}">Remove</button></div>`;
+    if (!groups.length || groups[groups.length - 1].day !== day) groups.push({ day, at: m.at, meals: [] });
+    groups[groups.length - 1].meals.push(m);
   });
-  const f = (key, label) => `<button class="chip btn-chip" data-act="filter" data-v="${key}" aria-pressed="${ui.histFilter === key}">${label}</button>`;
+  const row = m => `<li class="row"><div><div class="row-title"><b>${esc(m.name)}</b>${m.street ? '<span class="tag bad">Street</span>' : ''}${m.home ? '<span class="tag">Home cooked</span>' : ''}</div>
+      <small class="num">${new Date(m.at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' })} · ${Math.round(m.cal)} kcal · protein ${m.protein}g · carbs ${m.carbs}g · fat ${m.fat}g</small></div>
+      <button class="btn ghost danger small" data-act="remove" data-id="${esc(m.id)}" aria-label="Remove ${esc(m.name)}">${icon('trash')}<span>Remove</span></button></li>`;
+  const body = groups.map(g => `<section class="day-group"><h3 class="day">${dateLabel(g.at)} <small class="num">${Math.round(sum(all.filter(x => sameDay(x.at, g.at)), 'cal'))} kcal</small></h3>
+    <ul class="card list">${g.meals.map(row).join('')}</ul></section>`).join('');
+  const f = (key, label) => `<button class="seg-btn" data-act="filter" data-v="${key}" aria-pressed="${ui.histFilter === key}">${label}</button>`;
   const week = weekMeals(), street = week.filter(m => m.street).length;
-  return `<h2>History</h2><p class="sub">${week.length} meals in the last 7 days, ${street} of them street food.</p>
-  <div class="chips">${f('all', 'All')}${f('street', 'Street food')}${f('home', 'Home cooked')}<button class="btn small" data-act="exportCsv">Export CSV</button></div>
-  <details class="how add"><summary>Log a meal by hand</summary>
-    <div class="form-row"><label>Meal name<input id="m-name" placeholder="Egg roll"></label>
-    <label>Calories<input id="m-cal" type="number" min="0" max="3000" placeholder="350"></label></div>
+  return `<header class="page-head"><div><h2>History</h2><p class="sub">${week.length} meals in the last 7 days, ${street} of them street food.</p></div>
+    <button class="btn secondary" data-act="exportCsv">${icon('download')}Export CSV</button></header>
+  <div class="segmented filters" role="group" aria-label="Show meals">${f('all', 'All')}${f('street', 'Street food')}${f('home', 'Home cooked')}</div>
+  <details class="card add-meal"><summary>${icon('plus')}Log a meal by hand</summary>
+    <div class="form-row"><label class="field">Meal name<input id="m-name" placeholder="Egg roll"></label>
+    <label class="field">Calories<input id="m-cal" type="number" min="0" max="3000" placeholder="350"></label></div>
     <label class="check"><input type="checkbox" id="m-street"> Street food</label>
-    <button class="btn alt" data-act="addManual">Add meal</button></details>
-  ${body || '<p class="empty">No meals here yet. Scan one, or log one by hand.</p>'}`;
+    <div class="actions"><button class="btn" data-act="addManual">Add meal</button></div></details>
+  ${body || `<div class="empty-state">${icon('history')}<h3>No meals here yet</h3><p>Scan one, or log one by hand.</p><button class="btn accent" data-page="scan">${icon('camera')}Scan a meal</button></div>`}`;
 }
 
 function gearLabel(r) { return { none: 'No cooking', kettle: 'Kettle only', burner: 'Burner needed' }[r.gear] || ''; }
@@ -358,24 +446,25 @@ function gearLabel(r) { return { none: 'No cooking', kettle: 'Kettle only', burn
 function recipeCard(r, first) {
   const all = r.ingredientsList || r.pantry || [];
   const ing = all.filter(x => !all.some(y => y !== x && y.includes(x)));
-  return `<article class="swap ${first ? 'first' : ''}">
-    <div><small>${r.ai ? 'AI suggestion' : r.from ? 'Instead of ' + esc(r.from) : 'Home-cooked idea'}</small><h3>${esc(r.meal)}</h3></div>
-    <button class="btn alt" data-act="cooked" data-rid="${esc(r.id)}">I cooked this</button>
+  return `<article class="card recipe ${first ? 'match' : ''}">
+    <div class="recipe-head"><h3>${esc(r.meal)}</h3>${first ? '<span class="tag warm">Matches your street meal</span>' : ''}</div>
+    <p class="recipe-from">${r.ai ? 'AI suggestion' : r.from ? 'Instead of ' + esc(r.from) : 'Home-cooked idea'}</p>
     <p>${esc(r.why)}</p>
-    <small>${r.time} min · ${r.cal} kcal · protein ${r.protein}g${r.gear ? ' · ' + gearLabel(r) : ''}</small>
+    <ul class="meta num"><li>${icon('clock')}${r.time} min</li><li>${r.cal} kcal</li><li>protein ${r.protein}g</li>${r.gear ? `<li>${gearLabel(r)}</li>` : ''}</ul>
     ${(ing.length || (r.steps || []).length) ? `<details class="how"><summary>Ingredients and steps</summary>
       ${ing.length ? `<p><b>Main ingredients:</b> ${ing.map(esc).join(', ')}</p>` : ''}
       ${(r.steps || []).length ? `<ol>${r.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}</details>` : ''}
+    <button class="btn secondary" data-act="cooked" data-rid="${esc(r.id)}">${icon('check')}I cooked this</button>
   </article>`;
 }
 
 function suggestionsHtml() {
-  if (cook.busy) return '<p class="sub" role="status">Finding meals you can make…</p>';
+  if (cook.busy) return loadingHtml('ideas', cook.since);
   if (!cook.results) return '';
   const { source, meals, reason } = cook.results;
-  if (source === 'error') return `<p class="banner warn" role="alert">Couldn't get meal ideas from the AI. ${esc(reason || '')}</p>`;
-  if (!meals.length) return '<p class="empty">The AI found no meal for those ingredients with your kitchen and diet. Add a few more items.</p>';
-  return `<p class="sub">Suggested by the AI (Gemini) for what you have, your diet and your kitchen.</p>${meals.map(r => recipeCard(r, false)).join('')}`;
+  if (source === 'error') return `<div class="banner warn" role="alert">${icon('alert')}<div>Couldn't get meal ideas from the AI. ${esc(reason || '')}</div></div>`;
+  if (!meals.length) return `<div class="empty-inline">${icon('info')}<p>The AI found no meal for those ingredients with your kitchen and diet. Add a few more items.</p></div>`;
+  return `<p class="sub">Suggested by the AI (Gemini) for what you have, your diet and your kitchen.</p><div class="recipe-grid">${meals.map(r => recipeCard(r, false)).join('')}</div>`;
 }
 
 function cookPage() {
@@ -386,14 +475,15 @@ function cookPage() {
   const ordered = [...usable].sort((a, b) => hit(b) - hit(a));
   const rows = ordered.map((r, i) => recipeCard(r, i === 0 && hit(r))).join('');
   const why = cook.focus ? `You asked for a swap for ${esc(cook.focus)}.` : last ? `Your last street meal was ${esc(last.name)}, so matching swaps come first.` : 'Home-cooked swaps for common street food.';
-  return `<h2>Cook instead</h2><p class="sub">Showing meals for a ${esc(p.diet)} diet. Kitchen: ${esc((KITCHENS[p.kitchen] || KITCHENS.burner).toLowerCase())}. Change these in Health profile.</p>
-  <div class="block"><h3>What is in your room?</h3>
-    <label for="pantry">Ingredients you have, separated by commas</label>
-    <input id="pantry" value="${esc(cook.pantry)}" placeholder="poha, onion, peanuts" style="max-width:420px;width:100%">
-    <div class="chips">${PANTRY_CHIPS.map(c => `<button class="chip btn-chip" data-act="pantryAdd" data-v="${c}">${c}</button>`).join('')}</div>
-    <div class="actions"><button class="btn" data-act="suggest" id="suggest">Suggest meals</button></div>
-    <div id="suggestions" aria-live="polite">${suggestionsHtml()}</div></div>
-  <div class="block"><h3>Swaps for street food</h3><p class="sub">${why}</p>${rows || '<p class="empty">No swaps fit this diet and kitchen. Change them in Health profile.</p>'}</div>`;
+  return `<header class="page-head"><div><h2>Cook instead</h2><p class="sub">Showing meals for a ${esc(p.diet)} diet. Kitchen: ${esc((KITCHENS[p.kitchen] || KITCHENS.burner).toLowerCase())}. Change these in <a href="#profile" data-page="profile">Health profile</a>.</p></div></header>
+  <section class="card pantry-card"><h3>What is in your room?</h3>
+    <label for="pantry" class="field-label">Ingredients you have, separated by commas</label>
+    <div class="pantry-row"><input id="pantry" value="${esc(cook.pantry)}" placeholder="poha, onion, peanuts">
+      <button class="btn" data-act="suggest" id="suggest" ${cook.busy ? 'disabled aria-busy="true"' : ''}>${cook.busy ? '<span class="spinner" aria-hidden="true"></span>Finding meals…' : 'Suggest meals'}</button></div>
+    <div class="chips" aria-label="Add a common ingredient">${PANTRY_CHIPS.map(c => `<button class="chip btn-chip" data-act="pantryAdd" data-v="${c}">${icon('plus')}${c}</button>`).join('')}</div>
+    <div id="suggestions" aria-live="polite">${suggestionsHtml()}</div></section>
+  <section class="section"><h3 class="section-title">Swaps for street food</h3><p class="sub">${why}</p>
+    ${rows ? `<div class="recipe-grid">${rows}</div>` : `<div class="empty-inline">${icon('info')}<p>No swaps fit this diet and kitchen. Change them in Health profile.</p></div>`}</section>`;
 }
 
 function rewardsPage() {
@@ -402,43 +492,52 @@ function rewardsPage() {
   const can = claimable();
   const badgeRows = BADGES.map(b => {
     const got = state.badges[b.id];
-    return `<div class="badge ${got ? '' : 'locked'}"><span aria-hidden="true">${b.icon}</span>
-      <div><b>${b.name}</b><br><small>${got ? 'Unlocked ' + dateLabel(got) : b.desc + ' (' + Math.min(b.of(ctx), b.goal) + ' of ' + b.goal + ')'}</small></div></div>`;
+    const prog = Math.min(b.of(ctx), b.goal);
+    return `<li class="badge ${got ? '' : 'locked'}"><span class="badge-icon">${icon(b.icon)}</span>
+      <div><b>${b.name}</b><small>${got ? 'Unlocked ' + dateLabel(got) : b.desc}</small>
+      ${got ? '' : `<div class="progress thin" role="progressbar" aria-label="${b.name} progress" aria-valuemin="0" aria-valuemax="${b.goal}" aria-valuenow="${prog}"><i style="width:${prog / b.goal * 100}%"></i></div><small class="num">${prog} of ${b.goal}</small>`}</div></li>`;
   }).join('');
-  return `<h2>Rewards</h2><p class="sub">Go a full week without street food to unlock the weekly reward.</p>
-  ${dots(streak)}
-  <p class="big" style="font-size:2rem">${streak} day${streak === 1 ? '' : 's'} street-free</p>
-  <p class="sub">${next ? (next.goal - streak) + ' more days for "' + next.name + '". ' : 'Every streak badge unlocked. '}Best run so far: ${best} day${best === 1 ? '' : 's'}.</p>
-  <div class="block reward ${can ? 'ready' : ''}"><h3>Weekly reward</h3>
+  return `<header class="page-head"><div><h2>Rewards</h2><p class="sub">Go a full week without street food to unlock the weekly reward.</p></div></header>
+  <div class="rewards-top">
+  <section class="card streak-card"><h3>Street-free streak</h3><p class="big num">${streak} <span>day${streak === 1 ? '' : 's'}</span></p>
+    ${dots(streak)}
+    <p class="sub">${next ? (next.goal - streak) + ' more days for "' + next.name + '". ' : 'Every streak badge unlocked. '}Best run so far: ${best} day${best === 1 ? '' : 's'}.</p></section>
+  <section class="card reward ${can ? 'ready' : ''}"><h3>Weekly reward</h3>
     <p>${can ? 'You made it through a full street-free week. Claim 50 bonus points.' : streak >= 7 ? 'Claimed for this week. The next one unlocks after 7 more street-free days.' : 'Unlocks after 7 days in a row without street food.'}</p>
-    <button class="btn alt" data-act="claim" ${can ? '' : 'disabled'}>${can ? 'Claim 50 points' : 'Not ready yet'}</button></div>
-  <div class="block"><h3>Level ${lv.n}: ${lv.name}</h3><div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${lv.into}"><i style="width:${lv.into}%"></i></div>
-    <p class="sub">${pts} points. ${100 - lv.into} more for the next level. You earn 10 for every street-free day, 5 for every home-cooked meal and 50 for each weekly reward.</p></div>
-  <div class="block"><h3>Badges</h3>${badgeRows}</div>`;
+    <button class="btn ${can ? 'accent' : 'secondary'}" data-act="claim" ${can ? '' : 'disabled'}>${can ? 'Claim 50 points' : 'Not ready yet'}</button></section>
+  <section class="card level-card"><h3>Level ${lv.n}: ${lv.name}</h3><div class="progress" role="progressbar" aria-label="Level progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${lv.into}"><i style="width:${lv.into}%"></i></div>
+    <p class="sub">${pts} points. ${100 - lv.into} more for the next level. You earn 10 for every street-free day, 5 for every home-cooked meal and 50 for each weekly reward.</p></section>
+  </div>
+  <section class="section"><h3 class="section-title">Badges</h3><ul class="badge-grid">${badgeRows}</ul></section>`;
 }
 
 function profilePage() {
   const p = state.profile;
   const bmi = p.weight / ((p.height / 100) ** 2);
   const cat = bmi < 18.5 ? 'below the usual range' : bmi < 25 ? 'in the usual range' : bmi < 30 ? 'above the usual range' : 'well above the usual range';
-  const field = (id, label, type = 'number', extra = '') => `<label>${label}<input id="p-${id}" type="${type}" value="${esc(p[id])}" ${extra}></label>`;
+  const field = (id, label, type = 'number', extra = '') => `<label class="field">${label}<input id="p-${id}" type="${type}" value="${esc(p[id])}" ${extra}></label>`;
   const opts = (id, map) => Object.entries(map).map(([v, t]) => `<option value="${v}" ${v === p[id] ? 'selected' : ''}>${t}</option>`).join('');
   const who = isGuestUser()
-    ? `<p>You are using a <b>guest session</b>. The AI works the same, but the session ends when you close this tab. Create an account to keep your meals.</p><button class="btn alt" data-act="syncNow">Sync now</button> <button class="btn" data-act="signOut">Sign in or create an account</button>`
-    : `<p>Signed in as <b>${esc(authLabel())}</b>. Meals and profile sync to your account.</p><button class="btn alt" data-act="syncNow">Sync now</button> <button class="btn" data-act="signOut">Sign out</button>`;
-  return `<h2>Health profile</h2><p class="sub">Your goals shape the dashboard and the advice you get. BMI ${bmi.toFixed(1)} is ${cat}. It is only a rough guide.</p>
+    ? `<p>You are using a <b>guest session</b>. The AI works the same, but the session ends when you close this tab. Create an account to keep your meals.</p><div class="actions"><button class="btn" data-act="signOut">Sign in or create an account</button><button class="btn secondary" data-act="syncNow">Sync now</button></div>`
+    : `<p>Signed in as <b>${esc(authLabel())}</b>. Meals and profile sync to your account.</p><div class="actions"><button class="btn secondary" data-act="syncNow">Sync now</button><button class="btn secondary" data-act="signOut">Sign out</button></div>`;
+  return `<header class="page-head"><div><h2>Health profile</h2><p class="sub">Your goals shape the dashboard and the advice you get. BMI ${bmi.toFixed(1)} is ${cat}. It is only a rough guide.</p></div></header>
+  <section class="card"><h3>About you</h3>
   <div class="form-grid">
   ${field('name', 'Name', 'text', 'maxlength="40"')}${field('age', 'Age', 'number', 'min="13" max="100"')}
-  <label>Sex<select id="p-sex">${opts('sex', { female: 'Female', male: 'Male', other: 'Prefer not to say' })}</select></label>
+  <label class="field">Sex<select id="p-sex">${opts('sex', { female: 'Female', male: 'Male', other: 'Prefer not to say' })}</select></label>
   ${field('weight', 'Weight (kg)', 'number', 'min="25" max="250"')}${field('height', 'Height (cm)', 'number', 'min="100" max="230"')}
-  <label>Activity<select id="p-activity">${opts('activity', { sitting: 'Mostly sitting', light: 'Light, some walking', active: 'Active, regular exercise' })}</select></label>
-  <label>Diet<select id="p-diet">${Object.keys(DIET_RANK).map(d => `<option ${d === p.diet ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
-  <label>Weight goal<select id="p-goalDir">${opts('goalDir', { lose: 'Lose weight', maintain: 'Stay the same', gain: 'Gain weight or muscle' })}</select></label>
-  <label>Kitchen in your room<select id="p-kitchen">${opts('kitchen', KITCHENS)}</select></label>
-  <label>Daily calorie goal<input id="p-goal" type="number" min="1200" max="4000" step="50" value="${esc(p.goal)}"></label></div>
-  <div class="actions"><button class="btn" data-act="saveProfile">Save profile</button><button class="btn alt" data-act="suggestGoal">Suggest a calorie goal</button></div>
-  <div class="block"><h3>Account</h3>${who}</div>
-  <div class="block"><h3>Your data</h3><p class="sub">Remove every logged meal and restart your streak. Badges you earned stay.</p><button class="btn ghost" data-act="clearMeals">Clear all logged meals</button></div>`;
+  <label class="field">Activity<select id="p-activity">${opts('activity', { sitting: 'Mostly sitting', light: 'Light, some walking', active: 'Active, regular exercise' })}</select></label></div>
+  <h3 class="form-section">Goals and kitchen</h3>
+  <div class="form-grid">
+  <label class="field">Diet<select id="p-diet">${Object.keys(DIET_RANK).map(d => `<option ${d === p.diet ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+  <label class="field">Weight goal<select id="p-goalDir">${opts('goalDir', { lose: 'Lose weight', maintain: 'Stay the same', gain: 'Gain weight or muscle' })}</select></label>
+  <label class="field">Kitchen in your room<select id="p-kitchen">${opts('kitchen', KITCHENS)}</select></label>
+  <label class="field">Daily calorie goal<input id="p-goal" type="number" min="1200" max="4000" step="50" value="${esc(p.goal)}"></label></div>
+  <div class="actions"><button class="btn" data-act="saveProfile">Save profile</button><button class="btn secondary" data-act="suggestGoal">Suggest a calorie goal</button></div></section>
+  <div class="two-up">
+  <section class="card"><h3>Account</h3>${who}</section>
+  <section class="card"><h3>Your data</h3><p class="sub">Remove every logged meal and restart your streak. Badges you earned stay.</p><div class="actions"><button class="btn ghost danger" data-act="clearMeals">${icon('trash')}Clear all logged meals</button></div></section>
+  </div>`;
 }
 
 const pages = { dashboard, scan: scanPage, history: historyPage, cook: cookPage, rewards: rewardsPage, profile: profilePage };
@@ -537,11 +636,11 @@ async function loadInsight() {
     const el = $('#ai-insight');
     if (!el) return;
     const tone = { on_track: 'good', over: 'warn', under: 'info', no_data: 'info' }[d.health_status] || 'info';
-    el.innerHTML = `<h3>Today's AI insight</h3><p class="insight ${tone}"><b>${esc(d.headline)}</b> ${esc(d.summary)}</p>
-      <ul class="reasons">${d.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul><p class="sub small">${esc(d.disclaimer)}</p>`;
+    el.innerHTML = `<h3>Today's AI insight</h3><p class="insight-head ${tone}">${esc(d.headline)}</p><p class="insight-body">${esc(d.summary)}</p>
+      <ul class="tips">${d.tips.map(t => `<li>${icon('check')}<span>${esc(t)}</span></li>`).join('')}</ul><p class="sub small">${esc(d.disclaimer)}</p>`;
   } catch (e) {
     const el = $('#ai-insight');
-    if (el) el.innerHTML = `<h3>Today's AI insight</h3><p class="sub">Not available right now. ${esc(reasonFor(e))}</p>`;
+    if (el) el.innerHTML = `<h3>Today's AI insight</h3><div class="empty-inline">${icon('info')}<p>Not available right now. ${esc(reasonFor(e))}</p></div>`;
   }
   refreshStatus();
 }
@@ -556,8 +655,9 @@ function setFile(f) {
   if (scan.url) URL.revokeObjectURL(scan.url);
   scan = { ...scan, file: f, url: URL.createObjectURL(f), result: null, chat: [], added: false };
   const img = $('#preview'); if (img) { img.src = scan.url; img.hidden = false; }
+  const d = $('.drop'); if (d) d.classList.add('has-img');
   const n = $('#fname'); if (n) n.textContent = f.name;
-  const r = $('#result'); if (r) r.innerHTML = '';
+  const r = $('#result'); if (r) r.innerHTML = resultSlot();
 }
 
 async function askAbout(text) {
@@ -579,8 +679,11 @@ const actions = {
   async analyze(btn) {
     if (!scan.file) return toast('Choose a photo first');
     if (scan.busy) return;
-    scan.busy = true; btn.disabled = true;
-    $('#result').innerHTML = `<p class="sub" role="status">Analyzing your food… ${signedIn() ? 'The AI checks every item on the plate; this usually takes 5–30 seconds.' : ''}</p>`;
+    scan.busy = true; scan.since = Date.now();
+    busyButton(btn, true, 'Analyzing…');
+    const loading = $('#result');
+    loading.innerHTML = loadingHtml('scan', scan.since);
+    loading.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     const mode = document.querySelector('[name=mode]:checked').value;
     try {
       scan.mode = mode;
@@ -597,7 +700,7 @@ const actions = {
       refreshStatus();
     } finally { scan.busy = false; }
     const box = $('#result'), b = $('#analyze');
-    if (b) b.disabled = false;
+    if (b) { busyButton(b, false); b.innerHTML = 'Analyze'; }
     if (box) box.innerHTML = resultHtml();
   },
   toggleStreet(box) { scan.result.street = box.checked; const tag = $('#result .tag'); if (tag) { tag.textContent = box.checked ? 'Street food' : 'Not street food'; tag.classList.toggle('bad', box.checked); } },
@@ -605,7 +708,7 @@ const actions = {
     if (scan.added) return;
     scan.added = true;
     logMeal(newMeal(scan.result, { source: scan.mode, scanId: scan.result.scanId, mealType: scan.result.mealType }));
-    btn.disabled = true; btn.textContent = 'Added to your log';
+    btn.disabled = true; btn.innerHTML = icon('check') + 'Added to your log';
     toast('Added to your log');
   },
   swapFor() { cook.focus = scan.result.name; show('cook', { focus: true, push: true }); },
@@ -627,10 +730,11 @@ const actions = {
     const items = cook.pantry.split(/,|\n|;/).map(s => s.trim()).filter(Boolean);
     if (!items.length) return toast('Add at least one ingredient');
     if (cook.busy) return;
-    cook.busy = true; btn.disabled = true; $('#suggestions').innerHTML = suggestionsHtml();
+    cook.busy = true; cook.since = Date.now();
+    busyButton(btn, true, 'Finding meals…'); $('#suggestions').innerHTML = suggestionsHtml();
     try { cook.results = await suggestMeals(items, state.profile); } finally { cook.busy = false; }
     const box = $('#suggestions'), b = $('#suggest');
-    if (b) b.disabled = false;
+    if (b) { busyButton(b, false); b.innerHTML = 'Suggest meals'; }
     if (box) box.innerHTML = suggestionsHtml();
     refreshStatus();
   },
@@ -701,7 +805,7 @@ const actions = {
       try { await pushProfile(state.profile); await refreshServerNumbers(); toast('Profile saved and synced'); refreshStatus(); }
       catch (e) { toast('Profile saved on this device. ' + reasonFor(e)); refreshStatus(); }
     } else toast('Profile saved on this device');
-    show('profile');
+    if (currentPage() === 'profile') show('profile');  // don't pull the person back if they moved on meanwhile
   },
   syncNow() { return syncNow(true); },
   signOut() { return signOut(); },
@@ -766,6 +870,7 @@ function watchServer() {
   refreshStatus();
   watchServer();
   await startAuth();
+  refreshStatus(); // show who is signed in straight away, before the slower sync below
   loadState();
   await refreshServerNumbers();
   checkBadges(true);
