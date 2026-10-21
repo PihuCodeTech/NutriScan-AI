@@ -14,11 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api import metrics as metrics_endpoint
 from app.api.deps import build_classifier, build_llm, build_storage
 from app.api.v1.router import api_router
-from app.core.config import APP_VERSION, ENV_FILE, Settings, get_settings, shell_overrides
+from app.core.config import APP_VERSION, ENV_FILE, Settings, get_settings, production_warnings, shell_overrides
 from app.core.errors import register_exception_handlers
+from app.core.http_guards import BODY_OVERHEAD_BYTES, BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.logging import RequestContextMiddleware, configure_logging
+from app.core.metrics import metrics
 from app.core.rate_limit import limiter
 from app.db import models  # noqa: F401  (registers tables)
 from app.db.base import Base
@@ -32,6 +35,7 @@ from app.db.session import (
     warm_pool,
 )
 from app.services import maintenance, nutrition_db
+from app.services.monitoring import Monitor, report_crash
 
 logger = logging.getLogger("app")
 
@@ -84,16 +88,23 @@ async def _prepare_database(app: FastAPI) -> None:
                 await nutrition_db.seed(session)
     except Exception:
         logger.exception("could not seed the foods table; scans will fall back to AI estimates")
-    try:
-        async with get_sessionmaker()() as session:
-            await maintenance.cleanup_guests(session, app.state.storage, settings.GUEST_RETENTION_DAYS)
-    except Exception:
-        logger.exception("guest cleanup failed")
+    await app.state.monitor.run_job("guest_cleanup", lambda: _cleanup_guests(app))
     warm = await warm_pool()
     logger.info(
         "database ready",
         extra={"ms": round((time.perf_counter() - started) * 1000), "warm_connections": warm},
     )
+
+
+async def _cleanup_guests(app: FastAPI) -> None:
+    async with get_sessionmaker()() as session:
+        await maintenance.cleanup_guests(session, app.state.storage, app.state.settings.GUEST_RETENTION_DAYS)
+
+
+async def _load_classifier(app: FastAPI) -> None:
+    await app.state.classifier.load()
+    if app.state.classifier.status == "error":  # load() logs the cause and lets scans run without hints
+        raise RuntimeError("classifier failed to load")
 
 
 @asynccontextmanager
@@ -109,7 +120,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         background += [db_task, asyncio.create_task(keep_warm(), name="db-keepalive")]
     # Load the classifier in the background: the first run downloads ~350 MB, and the API (and the web app)
     # must be reachable meanwhile. Until it is ready, scans simply run without classifier hints.
-    background.append(asyncio.create_task(app.state.classifier.load(), name="classifier-load"))
+    monitor: Monitor = app.state.monitor
+    background += [
+        asyncio.create_task(monitor.run_job("classifier_load", lambda: _load_classifier(app)), name="classifier-load"),
+        asyncio.create_task(monitor.watch(), name="monitor-watchdog"),
+        asyncio.create_task(monitor.sample_loop_lag(), name="monitor-loop-lag"),
+        asyncio.create_task(
+            monitor.run_every("guest_cleanup", settings.GUEST_CLEANUP_INTERVAL_H * 3600, lambda: _cleanup_guests(app)),
+            name="guest-cleanup",
+        ),
+    ]
+    for task in background:
+        task.add_done_callback(report_crash)
     overrides = shell_overrides()
     if overrides:
         logger.warning(
@@ -128,6 +150,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "classifier": app.state.classifier.status,
             "classifier_model": settings.CLASSIFIER_MODEL_ID,
             "env_file": str(ENV_FILE) if ENV_FILE.is_file() else "missing",
+            "metrics_endpoint": bool(settings.METRICS_TOKEN),
+            "alert_webhook": bool(settings.ALERT_WEBHOOK_URL),
         },
     )
     if settings.APP_ENV == "dev" and app.state.frontend_mounted:
@@ -149,6 +173,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.LOG_LEVEL)
+    for warning in production_warnings(settings):
+        logger.warning(warning)
 
     app = FastAPI(
         title="NutriScan AI API",
@@ -162,8 +188,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.classifier = build_classifier(settings)
     app.state.storage = build_storage(settings)
     app.state.limiter = limiter
+    app.state.monitor = Monitor(settings)
+    app.state.monitor.watch_classifier(lambda: app.state.classifier.status)
+    metrics.add_collector("app", app.state.monitor.collect)
 
     register_exception_handlers(app)
+    # Added first = innermost: oversized bodies are refused before parsing, and the 413 still gets CORS headers.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_upload_bytes + BODY_OVERHEAD_BYTES)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
@@ -172,10 +203,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
         expose_headers=["X-Request-ID"],
     )
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestContextMiddleware)
 
     Path(settings.STORAGE_DIR).mkdir(parents=True, exist_ok=True)
     app.include_router(api_router)
+    app.include_router(metrics_endpoint.router)
 
     # The web frontend (static HTML/JS) is served from the same origin, so no CORS setup is needed.
     frontend = Path(settings.FRONTEND_DIR)
