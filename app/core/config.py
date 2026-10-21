@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.8-flash"
     GEMINI_FALLBACK_MODEL: str = "gemini-3.5-flash-lite"
     GEMINI_TIMEOUT_S: float = 30.0
+    # After a model is overloaded / times out, send requests to the other model first for this long (seconds),
+    # instead of making every request wait on the struggling one. 0 = off.
+    GEMINI_COOLDOWN_S: float = 120.0
     # Gemini 3 "thinking" depth: minimal | low | medium | high, or empty for the model default.
     # Low keeps scans and chat quick; models that don't support the setting simply ignore it here.
     GEMINI_THINKING_LEVEL: str = "low"
