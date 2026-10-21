@@ -31,6 +31,7 @@ from app.services.llm.retry import (  # noqa: F401
     is_auth_error,
     is_network_error,
     is_not_found,
+    should_cool_down,
 )
 from app.services.llm.retry import classify as _classify
 from app.services.llm.retry import describe as _describe
@@ -135,6 +136,7 @@ class GeminiClient:
         self._client: genai.Client | None = None
         self._last_model = settings.GEMINI_MODEL
         self._no_thinking: set[str] = set()  # models that rejected `thinking_level`
+        self._cooldown_until: dict[str, float] = {}  # model → monotonic time until which it is tried last
 
     # ------------------------------------------------------------------ plumbing
 
@@ -155,12 +157,35 @@ class GeminiClient:
         return self._client
 
     def _model_plan(self) -> list[tuple[str, float]]:
-        """(model, delay-before-attempt): primary, primary again after a pause, then the fallback."""
+        """(model, delay-before-attempt): primary, primary again after a pause, then the fallback.
+
+        Circuit breaker: if the primary failed moments ago (overloaded, timed out, quota), the fallback goes
+        first and the primary is only a last resort, so one struggling model doesn't add 10-30 s to every
+        request. The primary is tried first again once its cooldown ends."""
         primary, fallback = self.settings.GEMINI_MODEL, self.settings.GEMINI_FALLBACK_MODEL
-        plan = [(primary, 0.0), (primary, RETRY_DELAY_S)]
-        if fallback and fallback != primary:
-            plan.append((fallback, 0.0))
-        return plan
+        if not fallback or fallback == primary:
+            return [(primary, 0.0), (primary, RETRY_DELAY_S)]
+        if self._cooling(primary) and not self._cooling(fallback):
+            return [(fallback, 0.0), (primary, 0.0)]
+        return [(primary, 0.0), (primary, RETRY_DELAY_S), (fallback, 0.0)]
+
+    def _cooling(self, model: str) -> bool:
+        return time.monotonic() < self._cooldown_until.get(model, 0.0)
+
+    def _note_failure(self, model: str, exc: BaseException) -> None:
+        cooldown = self.settings.GEMINI_COOLDOWN_S
+        if cooldown <= 0 or not should_cool_down(exc):
+            return
+        if not self._cooling(model):
+            logger.warning(
+                "gemini model cooling down; the other model goes first",
+                extra={"model": model, "seconds": cooldown, "error": _describe(exc)},
+            )
+        self._cooldown_until[model] = time.monotonic() + cooldown
+
+    def _note_success(self, model: str) -> None:
+        self._last_model = model
+        self._cooldown_until.pop(model, None)
 
     def _thinking(self, model: str) -> types.ThinkingConfig | None:
         """Low thinking keeps extraction and chat fast (Gemini 3 thinks a lot by default and can take > 30 s)."""
@@ -206,13 +231,14 @@ class GeminiClient:
                 await asyncio.sleep(delay)
             try:
                 result = await asyncio.wait_for(op(model), timeout=self.settings.GEMINI_TIMEOUT_S)
-                self._last_model = model
+                self._note_success(model)
                 return result
             except AppError:
                 raise
             except Exception as exc:
                 last_exc = exc
                 kind = _classify(exc)
+                self._note_failure(model, exc)
                 logger.warning(
                     "gemini attempt failed",
                     extra={"op": op_name, "model": model, "error": _describe(exc), "kind": kind},
@@ -427,7 +453,7 @@ class GeminiClient:
                         text_buf.append(delta)
                         yielded = True
                         yield StreamChunk(text=delta)
-                self._last_model = model
+                self._note_success(model)
                 logger.info(
                     "gemini stream",
                     extra={"model": model, "latency_ms": round((time.perf_counter() - started) * 1000)},
@@ -447,6 +473,7 @@ class GeminiClient:
                     continue  # same model again, without the thinking setting
                 last_exc = exc
                 kind = _classify(exc)
+                self._note_failure(model, exc)
                 logger.warning("gemini stream failed", extra={"model": model, "error": _describe(exc), "kind": kind})
                 if yielded or kind == "fatal":
                     raise _unavailable(exc) from exc
