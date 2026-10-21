@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import ssl
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -81,6 +82,21 @@ def is_sqlite(url: str) -> bool:
 async def _ping(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
+
+
+async def check_database(timeout_s: float = 5.0) -> float:
+    """Run `SELECT 1` on a pooled connection within `timeout_s`. Returns the seconds taken; raises on failure."""
+    started = time.perf_counter()
+    await asyncio.wait_for(_ping(get_engine()), timeout=timeout_s)
+    return time.perf_counter() - started
+
+
+def pool_stats() -> tuple[int, int] | None:
+    """(checked out, pool size) of the connection pool, or None for SQLite / pools without those numbers."""
+    pool = get_engine().pool
+    if not hasattr(pool, "checkedout") or not hasattr(pool, "size"):
+        return None
+    return pool.checkedout(), pool.size()
 
 
 async def warm_pool(count: int = WARM_CONNECTIONS) -> int:
