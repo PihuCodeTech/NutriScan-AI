@@ -27,7 +27,7 @@ class AppError(Exception):
         self.details = details
 
 
-# Convenience constructors for the error catalogue in docs/03_API_SPEC.md
+# Convenience constructors for the common error codes
 def not_found(what: str = "Resource") -> AppError:
     return AppError("NOT_FOUND", f"{what} not found.", 404)
 
