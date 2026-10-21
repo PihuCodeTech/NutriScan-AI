@@ -16,7 +16,7 @@ For this phase, a second audience matters: **hackathon judges** evaluating the p
 
 ## Product Purpose
 
-ScanMyFood lets a student photograph a meal or a packet's nutrition label and get, within seconds, an estimate of what is on the plate: each item, its portion, calories and nutrients, a health score, and practical, budget-aware tips. It also tracks what they eat across the day and week, nudges them away from street food with a streak and rewards, suggests cheap home-cooked swaps from what they have in their room, and answers food questions in a chat that knows their profile, today's intake and the scan.
+NutriScan AI lets a student photograph a meal or a packet's nutrition label and get, within seconds, an estimate of what is on the plate: each item, its portion, calories and nutrients, a health score, and practical, budget-aware tips. It also tracks what they eat across the day and week, nudges them away from street food with a streak and rewards, suggests cheap home-cooked swaps from what they have in their room, and answers food questions in a chat that knows their profile, today's intake and the scan.
 
 It is being built as a **hackathon entry**. Success right now means a demo that works end to end, reliably, and makes the problem and the solution obvious to judges. Longer term, success means students build a habit of checking and improving what they eat.
 
@@ -43,7 +43,7 @@ It is being built as a **hackathon entry**. Success right now means a demo that 
 
 ## Brand Commitments
 
-- **Name:** "ScanMyFood" in the web app; the backend and API are "NutriScan AI".
+- **Name:** "NutriScan AI" for the web app, the backend and the API (the web app was called "ScanMyFood" until 2026-10-20).
 - **Voice:** friendly, practical and budget-aware; speaks the student's food language (mess, canteen, street food, dal, curd, sprouts, eggs, fruit).
 - **Safety, non-negotiable:** no medical diagnosis or prescriptions; for medical conditions give general guidance and suggest a doctor or dietitian. Never recommend crash diets, skipping meals, or intakes below a safe floor. If someone shows signs of disordered eating, respond supportively, avoid numbers and targets, and encourage talking to a professional or trusted person.
 - **Respect diet type and allergies** in every suggestion.
