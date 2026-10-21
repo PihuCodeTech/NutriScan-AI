@@ -1,7 +1,7 @@
 [project]
-name = "nutriscan-backend"
+name = "nutriscan-ai"
 version = "1.0.0"
-description = "NutriScan AI — AI food nutrition scanner and nutrition chatbot backend (FastAPI + Gemini)"
+description = "NutriScan AI: food photo nutrition scanner and nutrition chatbot (FastAPI + Gemini) with a web app"
 requires-python = ">=3.11"
 readme = "README.md"
 
