@@ -191,3 +191,34 @@ within each section.
   The backend never uses that API and connects as `postgres` (BYPASSRLS), so `0002` enables RLS with no policies
   on every public table and revokes `anon`/`authenticated` privileges, including default privileges for future
   tables. It is a no-op on SQLite and on Postgres without Supabase's roles.
+
+## Startup and latency pass (2026-10-20)
+Measured from India against the Sydney (`ap-southeast-2`) Supabase pooler: ~400 ms per round trip, ~8.5 s to
+open a new connection, and every request pays BEGIN + ROLLBACK on top of its queries.
+- **The server no longer waits for the database to start.** On Postgres, table creation, the foods seed, guest
+  cleanup and pool warm-up run in a background task (`_prepare_database` in `app/main.py`); failures are logged,
+  never fatal. Start-up went from ~14 s (and a crash if Supabase was paused or unreachable) to ~1 s. SQLite still
+  runs these inline: instant, and tests rely on it.
+- **Warm pool, kept alive.** `pool_recycle` is by connection *age*, so the old 240 s value threw every warm
+  connection away every 4 minutes and a user request paid the ~8.5 s reconnect. Now `warm_pool()` opens
+  `pool_size` connections at start-up, `keep_warm()` pings idle ones every 60 s (well inside Supavisor's idle
+  timeout), and `pool_recycle` is 30 min. Connect/checkout timeouts (20 s) and a 5 s bound on the `/health` DB
+  check mean a dead database fails fast instead of hanging requests.
+- **Fewer round trips.** `User.profile` is `lazy="joined"` (the user is loaded on every authenticated request;
+  `selectin` was a second query). `GET /intake/summary` folds four streak/count queries into two.
+- **Gemini circuit breaker.** `gemini-3.8-flash` was answering `503 UNAVAILABLE` ("high demand") or timing out
+  at 30 s, and every request waited on it before falling back (scans ~37 s; the fallback answers in ~1–2 s).
+  503 now goes straight to the fallback (no same-model retry), and a model that is overloaded / timing out /
+  rate-limited / missing is tried *last* for `GEMINI_COOLDOWN_S` (default 120 s, 0 = off). A 400 about one
+  request doesn't trigger it. All inside `gemini_client.py` / `retry.py`.
+- **Web app renders before the network.** The blank screen was `<main>` staying empty until a serial chain of
+  calls finished (health ping → `/users/me` → targets → summary; up to ~65 s on timeouts), plus a
+  render-blocking Google Fonts stylesheet. Now fonts load non-blocking, `<main>` has placeholder content, a
+  remembered session is verified in the background (a 401 still returns to sign-in), the dashboard renders from
+  local data immediately, `syncNow` fetches meals / profile / targets / summary in parallel, and boot errors
+  can't leave the page empty. Measured: first contentful paint ~100 ms on reload.
+- **Moved virtualenv.** `.venv` was created in `nutriscan-backend-kit/`, so `.venv/bin/uvicorn` etc. pointed at a
+  missing interpreter. Shebangs were repointed; `.claude/launch.json` uses `.venv/bin/python -m uvicorn`, which
+  survives a move.
+- **Biggest remaining cost is the region.** A Supabase project in Mumbai (`ap-south-1`) would cut each round trip
+  from ~400 ms to tens of ms; that needs a new project (only `DATABASE_URL` changes, then `alembic upgrade head`).
