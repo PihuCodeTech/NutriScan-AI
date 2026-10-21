@@ -34,3 +34,6 @@ ml/output/
 .DS_Store
 .idea/
 .vscode/
+
+# Database backups (docker compose "backup" service)
+backups/
