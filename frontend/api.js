@@ -1,4 +1,4 @@
-// ScanMyFood web: everything that talks to the NutriScan AI backend (/api/v1).
+// NutriScan AI web: everything that talks to the NutriScan AI backend (/api/v1).
 // Every response is an envelope {success, code, message, data}. Every AI feature (scan, chat, meal ideas,
 // insight) is answered by Gemini through the backend; nothing is faked on the page.
 const CFG = window.SMF_CONFIG;
@@ -264,7 +264,8 @@ async function pushMeal(m) {
   return entry.id;
 }
 
-const deleteMeal = id => callApi(`${endpoint('intake')}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+// keepalive lets the request finish while the page is closing.
+const deleteMeal = (id, keepalive = false) => callApi(`${endpoint('intake')}/${encodeURIComponent(id)}`, { method: 'DELETE', keepalive });
 
 // ---------- Profile ----------
 const ACTIVITY_TO_API = { sitting: 'sedentary', light: 'light', active: 'active' };
@@ -284,6 +285,7 @@ async function fetchRemoteProfile() {
   if (p.goal) out.goalDir = p.goal;
   if (p.diet_type) out.diet = DIET_FROM_API[p.diet_type];
   if (p.kitchen) out.kitchen = p.kitchen;
+  if (Array.isArray(p.allergies)) out.allergies = p.allergies;
   if (me.onboarding_complete) {
     const t = await fetchTargets();
     if (t?.calories) out.goal = Math.round(t.calories);
@@ -299,7 +301,15 @@ const pushProfile = p => callApi(endpoint('profile'), {
     age: Math.round(+p.age), sex: p.sex, height_cm: +p.height, weight_kg: +p.weight,
     activity_level: ACTIVITY_TO_API[p.activity] || 'light', goal: p.goalDir || 'maintain',
     diet_type: DIET_TO_API[p.diet] || 'veg', kitchen: p.kitchen || 'burner',
+    // Only when known: a partial profile (e.g. "Suggest a calorie goal") must not wipe saved allergies.
+    ...(Array.isArray(p.allergies) && { allergies: p.allergies }),
   }),
+});
+
+// The first-run choices alone: a partial update, so it never invents an age, height or weight.
+const pushProfileChoices = p => callApi(endpoint('profile'), {
+  method: 'PUT',
+  ...jsonBody({ goal: p.goalDir || 'maintain', diet_type: DIET_TO_API[p.diet] || 'veg', kitchen: p.kitchen || 'burner' }),
 });
 
 // Daily totals + server-computed targets (the UI's single source of truth for goals).
