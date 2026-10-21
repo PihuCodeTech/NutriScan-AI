@@ -1,4 +1,4 @@
-// ScanMyFood web: sign-in against the NutriScan AI backend (email + password → JWT bearer token, 7-day expiry).
+// NutriScan AI web: sign-in against the NutriScan AI backend (email + password → JWT bearer token, 7-day expiry).
 // Everyone uses the server, so scans, chat, meal ideas and insights always come from Gemini.
 // "Continue as guest" creates a throw-away guest account on the server (POST /auth/guest): no sign-up, same AI.
 //
@@ -37,7 +37,7 @@ window.onSessionExpired = () => {
 
 function loginMarkup() {
   return `<div class="login-card" role="dialog" aria-modal="true" aria-labelledby="login-title">
-    <div class="login-brand"><span class="brand-mark" aria-hidden="true"></span><h2 id="login-title">ScanMyFood</h2></div>
+    <div class="login-brand"><span class="brand-mark" aria-hidden="true"></span><h2 id="login-title">NutriScan AI</h2></div>
     <p class="login-lead">Photograph a meal or a nutrition label and see its estimated calories, nutrients and salt/sugar/fibre patterns, with budget-friendly swaps. Sign in to keep your meals on every device, or continue as a guest: the AI scanner and chat work the same way.</p>
     <form id="lg-form">
       <label class="field">Email<input id="lg-email" type="email" autocomplete="email" required></label>
@@ -121,17 +121,16 @@ async function startAuth() {
   const store = sessionStore();
   const token = store.getItem(TOKEN_KEY), cached = readJson(store, USER_KEY);
   if (token && cached?.id) {
+    // Start straight away with the cached user and check the token in the background: waiting for the
+    // server here (a full round trip to the database) kept the page empty on every load. An expired token
+    // gets a 401, and callApi then sends the person back to this sign-in screen (onSessionExpired).
     auth.mode = 'account'; auth.user = cached;
-    try {
-      const me = await callApi(endpoint('me'));
+    callApi(endpoint('me')).then(me => {
       auth.user = userFields(me);
       store.setItem(USER_KEY, JSON.stringify(auth.user));
-      return;
-    } catch (e) {
-      if (e.offline) return; // keep working from this device; calls retry when the server is back
-      auth.mode = 'none'; auth.user = null;
-      clearSession();
-    }
+      if (typeof refreshStatus === 'function') refreshStatus();
+    }).catch(() => { /* offline or a server error: keep working from this device */ });
+    return;
   }
   const expired = sessionStorage.getItem(EXPIRED_FLAG) === '1';
   sessionStorage.removeItem(EXPIRED_FLAG);
