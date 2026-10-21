@@ -1,6 +1,7 @@
 """Generate example API payloads in mock mode (no key, no network) into docs/examples/*.json.
 
-Used to build docs/FRONTEND_HANDOFF.md. Runs the real app in-process against a temporary SQLite DB.
+Gives frontend developers a real payload for every screen. Runs the real app in-process against a temporary
+SQLite DB.
 """
 
 from __future__ import annotations
