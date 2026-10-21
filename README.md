@@ -20,6 +20,8 @@ The project is a FastAPI backend (REST + SSE under `/api/v1`) with a web app ser
 - [API](#api)
 - [How it works](#how-it-works)
 - [Database](#database)
+- [Monitoring](#monitoring)
+- [Backups and recovery](#backups-and-recovery)
 - [Fine-tuning the classifier](#fine-tuning-the-classifier)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
@@ -55,23 +57,23 @@ The project is a FastAPI backend (REST + SSE under `/api/v1`) with a web app ser
 .
 ├── app/                    FastAPI application
 │   ├── api/v1/             Route handlers (auth, users, scans, intake, insights, chat, recipes, media, meta, health)
-│   ├── core/               Settings, errors, logging, security, rate limiting, signed media URLs
+│   ├── core/               Settings, errors, logging, metrics, security, rate limiting, signed media URLs
 │   ├── data/               Curated foods table (IFCT 2017 / USDA, per 100 g)
 │   ├── db/                 Engine, session and ORM models
 │   ├── schemas/            Request and response models
-│   ├── services/           Business logic: scan pipeline, nutrition, health engine, chat, insights
+│   ├── services/           Business logic: scan pipeline, nutrition, health engine, chat, insights, monitoring
 │   │   └── llm/            Gemini client, mock client, prompts, output schemas, retry policy
 │   └── main.py             App factory and start-up
 ├── alembic/                Database migrations
 ├── certs/                  Supabase root CA (TLS verification for the managed Postgres pooler)
-├── docker/                 Container entrypoint (runs migrations, then the server)
+├── docker/                 Container entrypoint (migrations, then the server); backup/ holds the backup scripts
 ├── docs/                   openapi.json and example payloads for every endpoint
 ├── frontend/               Web app served at /app/
 ├── ml/                     Optional fine-tuning script for Indian dishes
 ├── scripts/                Seeding, smoke test, OpenAPI export, example generation, guest cleanup
 ├── tests/                  pytest suite (tests/live holds opt-in calls to the real Gemini API)
 ├── Dockerfile
-├── docker-compose.yml      API + PostgreSQL 16
+├── docker-compose.yml      API + PostgreSQL 16 + verified nightly backups
 ├── pyproject.toml          ruff and pytest configuration
 └── requirements*.txt       Runtime and development dependencies
 ```
@@ -133,7 +135,7 @@ built against.
 ### Docker
 
 ```bash
-cp .env.example .env          # set GEMINI_API_KEY, JWT_SECRET (and MOCK_AI=false)
+cp .env.example .env          # set GEMINI_API_KEY, JWT_SECRET, POSTGRES_PASSWORD (and MOCK_AI=false)
 docker compose up --build     # API on :8000 + PostgreSQL 16; runs `alembic upgrade head` on start
 docker compose exec api python scripts/seed_demo.py   # optional demo data
 ```
@@ -141,6 +143,40 @@ docker compose exec api python scripts/seed_demo.py   # optional demo data
 The image is `python:3.11-slim` with CPU-only PyTorch, runs as a non-root user, keeps uploads and the model
 cache in the `appdata` volume (`/data`), and has a health check on `/api/v1/health` (180 s start period for the
 first model download).
+
+### Production deployment
+
+The image is the deployable unit: any container host (Cloud Run, Render, Fly.io, a VM with Docker) works.
+On start the entrypoint runs `alembic upgrade head`, then `uvicorn` on port 8000.
+
+**Required settings** (from the host's secret store, never committed):
+
+| Variable | Production value |
+|---|---|
+| `APP_ENV` | `prod` (the image sets it). Refuses to start with a weak `JWT_SECRET` or `MOCK_AI=true` |
+| `JWT_SECRET` | New random value of ≥ 32 characters, not the one used in development: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Changing it signs everyone out |
+| `DATABASE_URL` | PostgreSQL, e.g. the Supabase session pooler URI (see [Database](#database)) |
+| `GEMINI_API_KEY` | A key for production use, ideally with a budget alert in Google Cloud |
+| `PUBLIC_BASE_URL` | The public `https://` URL of the API (photo links are built from it) |
+| `CORS_ORIGINS` | The frontend's origin(s), e.g. `https://app.example.com` (not `*`) |
+| `FORWARDED_ALLOW_IPS` | The reverse proxy's address(es), so per-IP limits see real client IPs |
+
+Startup logs a warning for each risky value it finds (`*` CORS, a non-https URL, no Gemini key, SQLite).
+
+**Checklist**
+
+1. **HTTPS:** terminate TLS at the platform or a reverse proxy (Caddy, nginx) in front of port 8000.
+2. **One instance, one process:** rate limits and the insight cache are in memory. Don't add `--workers` or
+   replicas.
+3. **Persistent `/data` volume:** uploaded photos and the classifier cache (~350 MB, downloaded from
+   Hugging Face on first start) live there. On a host without volumes, photos are lost on redeploy.
+4. **Migrations:** run automatically on start and are additive. Back up the database before deploying a
+   release that adds a migration.
+5. **Health checks:** `GET /api/v1/health` is liveness (always 200, used by the container `HEALTHCHECK`);
+   `GET /api/v1/health/ready` answers 503 when the database is unreachable. Point an uptime monitor at the
+   second one.
+6. **Monitoring and backups:** set `ALERT_WEBHOOK_URL`, add an external uptime check and confirm backups run
+   (see [Monitoring](#monitoring) and [Backups and recovery](#backups-and-recovery)).
 
 ## Configuration
 
@@ -151,7 +187,7 @@ All settings come from environment variables (or `.env`); see [`.env.example`](.
 | `APP_ENV` | `dev` | `dev` / `test` / `prod`. Dev and test create tables automatically; prod relies on Alembic and requires a real `JWT_SECRET` |
 | `LOG_LEVEL` | `INFO` | JSON-lines logs with a request id |
 | `PUBLIC_BASE_URL` | `http://localhost:8000` | Used to build absolute image URLs |
-| `CORS_ORIGINS` | `*` | Comma-separated allowed origins |
+| `CORS_ORIGINS` | `*` | Comma-separated allowed origins. Set the frontend's origin(s) in prod (a warning is logged for `*`) |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./nutriscan.db` | PostgreSQL: `postgresql+asyncpg://user:pass@host:5432/db` (a plain `postgresql://` URL is converted) |
 | `JWT_SECRET` | *(set it)* | HS256 signing key |
 | `JWT_EXPIRE_MINUTES` | `10080` | 7 days |
@@ -171,9 +207,16 @@ All settings come from environment variables (or `.env`); see [`.env.example`](.
 | `MEDIA_URL_TTL_S` | `86400` | Lifetime of a signed photo URL |
 | `GUEST_RETENTION_DAYS` | `3` | Guest accounts older than this are deleted with their photos |
 | `RATE_LIMIT_AI` | `20/minute` | Per user, per AI endpoint |
+| `RATE_LIMIT_LOGIN` | `10/minute` | Per client IP |
+| `RATE_LIMIT_REGISTER` | `20/hour` | Per client IP (guests: 30/hour per IP) |
 | `CHAT_HISTORY_TURNS` | `20` | Messages sent to Gemini per request |
 | `CHAT_MAX_TOOL_ROUNDS` | `4` | |
 | `FRONTEND_DIR` | `./frontend` | Web app served at `/app/` |
+| `METRICS_TOKEN` | | Bearer token for `GET /metrics`; empty = endpoint disabled |
+| `ALERT_WEBHOOK_URL` | | Slack or Discord incoming webhook for alerts; empty = alerts are only logged |
+| `ALERT_REPEAT_MIN` | `240` | Re-send a still-firing alert this often; `0` = once |
+| `MONITOR_INTERVAL_S` | `60` | How often the watchdog checks the database and evaluates alert rules |
+| `GUEST_CLEANUP_INTERVAL_H` | `24` | Guest cleanup runs on start-up, then this often |
 
 ## API
 
@@ -268,9 +311,9 @@ the background. Static asset URLs carry a `?v=N` query in `index.html`; bump it 
 ### Photos and guests
 
 Uploaded photos are not public. They are served only through `GET /api/v1/media/{path}` with a signed URL
-(HMAC over the path, valid for `MEDIA_URL_TTL_S`). Guest accounts are deleted with their photos after
-`GUEST_RETENTION_DAYS`, on start-up and via `python scripts/cleanup_guests.py` (schedule it daily in
-production).
+(HMAC over the path with a key derived from `JWT_SECRET` for photo links only, valid for `MEDIA_URL_TTL_S`). Guest accounts are deleted with their photos after
+`GUEST_RETENTION_DAYS`, on start-up and then every `GUEST_CLEANUP_INTERVAL_H` hours (or on demand with
+`python scripts/cleanup_guests.py`).
 
 ## Database
 
@@ -285,6 +328,97 @@ TLS to Supabase is verified against `certs/supabase-ca.crt`. On PostgreSQL, star
 database: table creation, seeding, guest cleanup and connection warm-up run in the background,
 and a small pool of connections is kept alive so requests never pay for opening one. Choose a database region
 close to your users: each round trip to a distant region adds hundreds of milliseconds.
+
+## Monitoring
+
+Built in, with no extra services or dependencies (sized for one instance). The code is in
+`app/core/metrics.py` and `app/services/monitoring.py`.
+
+| What | Where |
+|---|---|
+| Logs | JSON lines on stdout: one `request` line per call (method, route, status, latency, `request_id`, `user_id`), Gemini calls with tokens and latency, job runs and alerts. Successful health and metrics probes are not logged |
+| Errors | Unhandled exceptions are logged with a traceback (`level=ERROR`) and counted; every error envelope is counted by `code` |
+| Metrics | `GET /metrics` (Prometheus text, needs `Authorization: Bearer $METRICS_TOKEN`): requests and latency per route, error codes, business events, Gemini calls, failures, tokens and latency, classifier failures, DB checks and pool use, background jobs, event-loop lag, memory, CPU, disk free |
+| Uptime | `GET /api/v1/health/ready` for an external monitor (503 when the database is down) |
+| Alerts | An in-process watchdog posts to `ALERT_WEBHOOK_URL` (and always logs `"msg": "alert firing"`) |
+
+**Business events** are counted from each success envelope's `code`: `REGISTERED`, `GUEST_CREATED`,
+`LOGGED_IN`, `SCAN_CREATED`, `INTAKE_LOGGED`, `MESSAGE_CREATED` / `MESSAGE_STREAMED`, `CHAT_CREATED`, and so
+on. Failed logins appear as `app_errors_total{code="INVALID_CREDENTIALS"}`.
+
+**Privacy.** Metric labels are route templates, codes and model names only: never ids, emails, raw paths or
+message text. Logs carry a user's id but never their email, password, tokens or meal text. A redaction filter
+also masks API keys, bearer tokens, JWTs, `password=`/`sig=` values and passwords in connection URLs, in
+case an exception message contains one.
+
+**Alert rules** (evaluated every minute; each one needs someone to act):
+
+| Alert | Fires when | Usual fix |
+|---|---|---|
+| `database_down` | 3 database checks in a row fail (~3 min) | Database host, Supabase project paused, `DATABASE_URL` |
+| `server_errors` | ≥ 5 HTTP 5xx and ≥ 5 % of requests in 5 min (Gemini's 502/503 excluded) | Search the logs for `level=ERROR` |
+| `gemini_config` | Any AI request refused for auth, quota, model or a missing key | Key, billing or model name; run `scripts/smoke_gemini.py` |
+| `gemini_unavailable` | ≥ 5 AI requests failed after retries and fallback, and ≥ 50 % of Gemini calls failed, in 5 min | Usually a Google outage; check the status page |
+| `job_failed:<job>` | The last run of `guest_cleanup` or `classifier_load` failed | Job logs (`"job": "<name>"`) |
+| `disk_low` | Uploads volume < 10 % or < 1 GiB free | Grow the volume or prune |
+| `memory_high` | Container memory > 90 % of its limit (cgroup v2) | Bigger instance |
+| `event_loop_blocked` | The event loop stalled > 2 s in 3 checks in a row | CPU-bound code outside the thread pool |
+
+An alert is sent when it starts, repeated every `ALERT_REPEAT_MIN` while it lasts, and followed by a
+`RESOLVED` message. Single blips (one failed check, one 500) don't page anyone.
+
+**Set up in production** (about 10 minutes):
+
+1. Create a Slack or Discord incoming webhook and set `ALERT_WEBHOOK_URL`.
+2. Add an external uptime check (UptimeRobot, Better Stack, Healthchecks, Uptime Kuma) on
+   `https://<host>/api/v1/health/ready` every 1 to 5 minutes, alerting after 2 failures. The process can't
+   report its own crash, a dead host or a broken TLS/DNS setup, so this check covers those.
+3. Optional: set `METRICS_TOKEN` and scrape `/metrics` (Grafana Cloud's free tier, or Prometheus) for
+   dashboards. Useful queries:
+   `histogram_quantile(0.95, sum by (le, route) (rate(nutriscan_http_request_duration_seconds_bucket[5m])))`,
+   `sum by (event) (increase(nutriscan_events_total[1d]))`,
+   `sum by (model, kind) (increase(nutriscan_gemini_tokens_total[1d]))`.
+4. Set a budget alert on the Gemini key in Google Cloud. Token counts are in the metrics, but spend is not.
+
+## Backups and recovery
+
+**Docker Compose (bundled PostgreSQL).** The `backup` service ([`docker/backup/`](docker/backup)) runs at
+start-up and then every `BACKUP_INTERVAL_HOURS` (24). Each run:
+
+1. Dumps the database with `pg_dump` (custom format) to `./backups/db-<UTC time>.dump`.
+2. **Verifies the dump** by restoring it into a scratch database (`<db>_restore_check`), checking that every
+   core table and the schema version are present, logging row counts, then dropping the scratch database.
+   An untested backup is assumed to be broken.
+3. Archives the uploaded photos to `./backups/uploads-<UTC time>.tar.gz` and checks that the archive reads
+   back.
+4. Deletes backups older than `BACKUP_RETENTION_DAYS` (14). Files are owner-only (`0600`) because they contain
+   every user's data.
+5. On success, pings `BACKUP_HEARTBEAT_URL`, a dead-man's switch such as a free healthchecks.io check with a
+   26-hour period, so you also hear about it when backups stop running. On failure, posts to
+   `ALERT_WEBHOOK_URL` and pings `<heartbeat>/fail`.
+
+`docker ps` shows the backup container as `unhealthy` once the last good backup is more than a day (plus 2
+hours) old. Run one by hand with `docker compose exec backup sh /backup/backup.sh`.
+
+**Copy backups off the machine.** `./backups` sits on the same disk as the database, so it doesn't survive
+losing the host. Sync it somewhere else, for example with `rclone sync ./backups remote:nutriscan-backups`
+from the host's cron.
+
+**Restore** (replaces all data; runs in one transaction, so a failed restore leaves the database unchanged):
+
+```bash
+docker compose stop api
+docker compose run --rm -e CONFIRM=yes backup sh /backup/restore.sh /backups/db-<STAMP>.dump
+docker compose run --rm -T api sh -c 'tar -xzf - -C /data' < backups/uploads-<STAMP>.tar.gz   # photos
+docker compose start api          # applies any newer migrations on start
+```
+
+Practise this once on a spare machine and time it. That number is your real recovery time.
+
+**Supabase.** Backups are Supabase's job: daily backups (and optional point-in-time recovery) on paid plans,
+restored from the dashboard. Check what your plan includes. The free plan has no backups you can rely on, so
+run `pg_dump "$DATABASE_URL" -Fc -f nutriscan.dump` on a schedule as well. Photos live on the API's `/data`
+volume either way, so back that up separately.
 
 ## Fine-tuning the classifier
 
@@ -346,4 +480,6 @@ The server log records the provider error for each attempt (`"msg": "gemini atte
 - Nothing here is medical advice. No diagnoses or prescriptions; medical questions are referred to a doctor or
   registered dietitian.
 - Rate limiting and the insight cache are in memory (single process), and uploads are stored on local disk.
+- Metrics are in memory and reset on restart. There is no distributed tracing and no error-tracking service
+  (such as Sentry); the logs carry tracebacks and request ids instead.
 - No refresh tokens, email verification or password reset; tokens cannot be revoked before they expire.
