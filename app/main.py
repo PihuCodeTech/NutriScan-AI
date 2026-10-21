@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,7 +22,15 @@ from app.core.logging import RequestContextMiddleware, configure_logging
 from app.core.rate_limit import limiter
 from app.db import models  # noqa: F401  (registers tables)
 from app.db.base import Base
-from app.db.session import dispose_engine, get_engine, get_sessionmaker, init_engine
+from app.db.session import (
+    dispose_engine,
+    get_engine,
+    get_sessionmaker,
+    init_engine,
+    is_sqlite,
+    keep_warm,
+    warm_pool,
+)
 from app.services import maintenance, nutrition_db
 
 logger = logging.getLogger("app")
@@ -52,14 +61,21 @@ TAGS = [
 ]
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def _prepare_database(app: FastAPI) -> None:
+    """Create tables (dev/test), seed the foods table, clean up old guests, then warm the connection pool.
+
+    Each step is independent and failures are logged, never raised: a slow or unreachable database must not
+    stop the server (and the web app) from starting. Requests that need the database fail on their own."""
     settings: Settings = app.state.settings
-    init_engine(settings.DATABASE_URL)
+    started = time.perf_counter()
     if settings.APP_ENV in {"dev", "test"}:
         # Convenience for local runs/tests; production uses `alembic upgrade head`.
-        async with get_engine().begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        try:
+            async with get_engine().begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        except Exception:
+            logger.exception("could not create tables; is the database reachable? (check DATABASE_URL)")
+            return
     # Load the nutrition reference table (52 Indian/common foods) if it's empty, so scans can ground
     # nutrients in curated per-100 g values instead of trusting the model's numbers. Idempotent and cheap.
     try:
@@ -73,9 +89,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await maintenance.cleanup_guests(session, app.state.storage, settings.GUEST_RETENTION_DAYS)
     except Exception:
         logger.exception("guest cleanup failed")
+    warm = await warm_pool()
+    logger.info(
+        "database ready",
+        extra={"ms": round((time.perf_counter() - started) * 1000), "warm_connections": warm},
+    )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings: Settings = app.state.settings
+    init_engine(settings.DATABASE_URL)
+    background: list[asyncio.Task[None]] = []
+    db_task = asyncio.create_task(_prepare_database(app), name="db-prepare")
+    if is_sqlite(settings.DATABASE_URL):
+        await db_task  # local file: instant, and tests expect the tables to exist on the first request
+    else:
+        # Remote Postgres (Supabase) costs ~400 ms per round trip from India: start serving straight away.
+        background += [db_task, asyncio.create_task(keep_warm(), name="db-keepalive")]
     # Load the classifier in the background: the first run downloads ~350 MB, and the API (and the web app)
     # must be reachable meanwhile. Until it is ready, scans simply run without classifier hints.
-    classifier_task = asyncio.create_task(app.state.classifier.load(), name="classifier-load")
+    background.append(asyncio.create_task(app.state.classifier.load(), name="classifier-load"))
     overrides = shell_overrides()
     if overrides:
         logger.warning(
@@ -105,8 +139,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        if not classifier_task.done():
-            classifier_task.cancel()
+        for task in background:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*background, return_exceptions=True)
         await dispose_engine()
 
 
