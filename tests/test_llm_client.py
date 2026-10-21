@@ -76,17 +76,80 @@ def _server_error() -> genai_errors.ServerError:
     return genai_errors.ServerError(503, {"error": {"code": 503, "message": "overloaded", "status": "UNAVAILABLE"}})
 
 
+def _internal_error() -> genai_errors.ServerError:
+    return genai_errors.ServerError(500, {"error": {"code": 500, "message": "oops", "status": "INTERNAL"}})
+
+
 def _client_error(code: int) -> genai_errors.ClientError:
     return genai_errors.ClientError(code, {"error": {"code": code, "message": "nope", "status": "X"}})
 
 
 async def test_falls_back_when_primary_fails():
     fixture = rajma_chawal_fixture()
-    client, models = _client({"primary-model": [_server_error()], "fallback-model": [_resp(parsed=fixture)]})
+    client, models = _client({"primary-model": [_internal_error()], "fallback-model": [_resp(parsed=fixture)]})
     result = await client.estimate_from_text("2 roti and dal", user_ctx="Country: IN")
     assert result == fixture
     assert models.calls == ["primary-model", "primary-model", "fallback-model"]
     assert client.last_model_used == "fallback-model"
+
+
+async def test_overloaded_503_goes_straight_to_fallback():
+    fixture = rajma_chawal_fixture()
+    client, models = _client({"primary-model": [_server_error()], "fallback-model": [_resp(parsed=fixture)]})
+    assert await client.estimate_from_text("rice", user_ctx="") == fixture
+    assert models.calls == ["primary-model", "fallback-model"]
+
+
+async def test_overloaded_primary_is_skipped_during_cooldown():
+    fixture = rajma_chawal_fixture()
+    client, models = _client({"primary-model": [_server_error()], "fallback-model": [_resp(parsed=fixture)]})
+    await client.estimate_from_text("rice", user_ctx="")
+    models.calls.clear()
+    await client.estimate_from_text("dal", user_ctx="")
+    assert models.calls == ["fallback-model"]  # the struggling primary isn't tried first again
+
+
+async def test_primary_is_tried_first_again_after_cooldown():
+    fixture = rajma_chawal_fixture()
+    client, models = _client(
+        {"primary-model": [_server_error(), _resp(parsed=fixture)], "fallback-model": [_resp(parsed=fixture)]}
+    )
+    await client.estimate_from_text("rice", user_ctx="")
+    client._cooldown_until["primary-model"] = 0.0  # cooldown elapsed
+    models.calls.clear()
+    await client.estimate_from_text("dal", user_ctx="")
+    assert models.calls == ["primary-model"]
+    assert client.last_model_used == "primary-model"
+
+
+async def test_cooling_primary_is_last_resort_when_fallback_fails():
+    fixture = rajma_chawal_fixture()
+    client, models = _client(
+        {"primary-model": [_server_error(), _resp(parsed=fixture)], "fallback-model": [_resp(parsed=fixture)]}
+    )
+    await client.estimate_from_text("rice", user_ctx="")
+    models.behaviour["fallback-model"] = [_server_error()]
+    models.calls.clear()
+    assert await client.estimate_from_text("dal", user_ctx="") == fixture
+    assert models.calls == ["fallback-model", "primary-model"]
+
+
+async def test_cooldown_can_be_switched_off():
+    fixture = rajma_chawal_fixture()
+    client, models = _client(
+        {"primary-model": [_server_error()], "fallback-model": [_resp(parsed=fixture)]}, GEMINI_COOLDOWN_S=0
+    )
+    await client.estimate_from_text("rice", user_ctx="")
+    models.calls.clear()
+    await client.estimate_from_text("dal", user_ctx="")
+    assert models.calls == ["primary-model", "fallback-model"]
+
+
+async def test_bad_request_does_not_trigger_cooldown():
+    fixture = rajma_chawal_fixture()
+    client, _ = _client({"primary-model": [_client_error(400)], "fallback-model": [_resp(parsed=fixture)]})
+    await client.estimate_from_text("rice", user_ctx="")
+    assert not client._cooling("primary-model")
 
 
 async def test_retry_on_429_then_primary_succeeds():
@@ -137,7 +200,7 @@ async def test_model_not_found_goes_straight_to_fallback():
 
 
 async def test_all_attempts_fail_raises_ai_unavailable():
-    client, models = _client({"primary-model": [_server_error()], "fallback-model": [_server_error()]})
+    client, models = _client({"primary-model": [_internal_error()], "fallback-model": [_internal_error()]})
     with pytest.raises(AppError) as exc:
         await client.estimate_from_text("rice", user_ctx="")
     assert exc.value.code == "AI_UNAVAILABLE" and exc.value.http_status == 503
@@ -343,12 +406,22 @@ async def test_stream_function_call_collected():
 
 async def test_stream_falls_back_before_first_chunk():
     client, calls = _stream_client(
-        {"primary-model": [_server_error(), _server_error()], "fallback-model": [[_chunk("ok")]]}
+        {"primary-model": [_internal_error(), _internal_error()], "fallback-model": [[_chunk("ok")]]}
     )
     chunks = [c async for c in client.chat_stream(system="s", history=[ChatHistoryItem(role="user", text="hi")])]
     assert chunks[-1].final.text == "ok"
     assert calls == ["primary-model", "primary-model", "fallback-model"]
     assert client.last_model_used == "fallback-model"
+
+
+async def test_stream_skips_overloaded_primary_on_the_next_message():
+    client, calls = _stream_client({"primary-model": [_server_error()], "fallback-model": [[_chunk("ok")], [_chunk("ok")]]})
+    history = [ChatHistoryItem(role="user", text="hi")]
+    [c async for c in client.chat_stream(system="s", history=history)]
+    assert calls == ["primary-model", "fallback-model"]  # a 503 "high demand" isn't retried on the same model
+    calls.clear()
+    [c async for c in client.chat_stream(system="s", history=history)]
+    assert calls == ["fallback-model"]
 
 
 async def test_stream_error_after_first_chunk_is_ai_unavailable():
