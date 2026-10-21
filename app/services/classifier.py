@@ -10,6 +10,8 @@ from typing import Any, Protocol
 from anyio import to_thread
 from PIL import Image
 
+from app.core.metrics import metrics
+
 logger = logging.getLogger(__name__)
 
 MOCK_PREDICTIONS = [
@@ -84,6 +86,7 @@ class HFClassifier:
         try:
             return await to_thread.run_sync(self._predict_sync, image_bytes)
         except Exception as exc:
+            metrics.inc("classifier_failures_total")
             logger.warning("classifier prediction failed", extra={"error": str(exc)})
             return None
 
