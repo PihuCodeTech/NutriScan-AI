@@ -28,6 +28,48 @@
         }
       }
     },
+    "/api/v1/health/ready": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Readiness (for uptime monitors)",
+        "description": "Same body as `/health`, but answers **503 NOT_READY** when the database is unreachable, so an external uptime monitor or load balancer can alert on (or route around) it. `/health` stays 200 for the container's liveness check: a database outage shouldn't restart the API. No auth.",
+        "operationId": "ready_api_v1_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_HealthOut_"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "NOT_READY",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "NOT_READY": {
+                    "summary": "NOT_READY",
+                    "value": {
+                      "success": false,
+                      "code": "NOT_READY",
+                      "message": "The database is unreachable."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/meta": {
       "get": {
         "tags": [
@@ -56,7 +98,7 @@
           "auth"
         ],
         "summary": "Create an account",
-        "description": "Registers a user (email is lower-cased) and returns a 7-day bearer token.",
+        "description": "Registers a user (email is lower-cased) and returns a 7-day bearer token. Rate limited per IP (RATE_LIMIT_REGISTER).",
         "operationId": "register_api_v1_auth_register_post",
         "requestBody": {
           "content": {
@@ -118,6 +160,26 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -128,7 +190,7 @@
           "auth"
         ],
         "summary": "Log in",
-        "description": "Exchange email + password for a bearer token.",
+        "description": "Exchange email + password for a bearer token. Rate limited per IP (RATE_LIMIT_LOGIN).",
         "operationId": "login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -185,6 +247,26 @@
                       "success": false,
                       "code": "VALIDATION_ERROR",
                       "message": "Some fields are invalid."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "RATE_LIMITED",
+                    "value": {
+                      "success": false,
+                      "code": "RATE_LIMITED",
+                      "message": "Too many requests. Please slow down and try again shortly."
                     }
                   }
                 }
@@ -1921,7 +2003,7 @@
           "insights"
         ],
         "summary": "Daily insight",
-        "description": "Encouraging headline, 2-sentence summary and 3 tips written by Gemini over the day's server-computed numbers. Cached per (user, date, totals); `no_data` days get a static nudge without an AI call.",
+        "description": "Encouraging headline, 2-sentence summary and up to 3 tips written by Gemini over the day's server-computed numbers (including `no_data` days). Cached per (user, date, totals). Future dates → 422.",
         "operationId": "daily_insight_api_v1_insights_daily_get",
         "security": [
           {
@@ -5784,6 +5866,7 @@
             "maxLength": 128,
             "minLength": 8,
             "title": "Password",
+            "description": "8 characters to 72 bytes (UTF-8)",
             "examples": [
               "hostel-life-123"
             ]
