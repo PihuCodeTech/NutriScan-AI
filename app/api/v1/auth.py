@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 
 from app.api.deps import DB
 from app.api.v1.docs import errors
-from app.core.rate_limit import limiter
+from app.core.rate_limit import client_ip_key, limiter, login_limit, register_limit
 from app.core.responses import ok
 from app.core.security import create_access_token
 from app.schemas.auth import LoginIn, RegisterIn, TokenOut
@@ -19,10 +19,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     status_code=201,
     response_model=Envelope[TokenOut],
     summary="Create an account",
-    description="Registers a user (email is lower-cased) and returns a 7-day bearer token.",
-    responses=errors("EMAIL_TAKEN", "VALIDATION_ERROR"),
+    description="Registers a user (email is lower-cased) and returns a 7-day bearer token. Rate limited per IP "
+    "(RATE_LIMIT_REGISTER).",
+    responses=errors("EMAIL_TAKEN", "VALIDATION_ERROR", "RATE_LIMITED"),
 )
-async def register(body: RegisterIn, db: DB) -> dict:
+@limiter.limit(register_limit, key_func=client_ip_key)
+async def register(request: Request, body: RegisterIn, db: DB) -> dict:
     user = await user_service.register(db, email=body.email, password=body.password, name=body.name)
     data = {"access_token": create_access_token(user.id), "token_type": "bearer", "user": user_service.user_out(user)}
     return ok(data, "REGISTERED", "Account created")
@@ -32,10 +34,11 @@ async def register(body: RegisterIn, db: DB) -> dict:
     "/login",
     response_model=Envelope[TokenOut],
     summary="Log in",
-    description="Exchange email + password for a bearer token.",
-    responses=errors("INVALID_CREDENTIALS", "VALIDATION_ERROR"),
+    description="Exchange email + password for a bearer token. Rate limited per IP (RATE_LIMIT_LOGIN).",
+    responses=errors("INVALID_CREDENTIALS", "VALIDATION_ERROR", "RATE_LIMITED"),
 )
-async def login(body: LoginIn, db: DB) -> dict:
+@limiter.limit(login_limit, key_func=client_ip_key)
+async def login(request: Request, body: LoginIn, db: DB) -> dict:
     user = await user_service.authenticate(db, email=body.email, password=body.password)
     data = {"access_token": create_access_token(user.id), "token_type": "bearer", "user": user_service.user_out(user)}
     return ok(data, "LOGGED_IN", "Logged in")
@@ -50,7 +53,7 @@ async def login(body: LoginIn, db: DB) -> dict:
     "people who don't sign up still get real AI scans, chat and suggestions. Limited to 30 per hour per IP.",
     responses=errors("RATE_LIMITED"),
 )
-@limiter.limit("30/hour")
+@limiter.limit("30/hour", key_func=client_ip_key)
 async def guest(request: Request, db: DB) -> dict:
     user = await user_service.create_guest(db)
     data = {"access_token": create_access_token(user.id), "token_type": "bearer", "user": user_service.user_out(user)}
