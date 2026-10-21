@@ -37,5 +37,12 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).status == 200 else 1)"
 
+# Behind a reverse proxy / load balancer, set FORWARDED_ALLOW_IPS (read by uvicorn) to the proxy's address(es) so
+# the real client IP is used for the per-IP login/sign-up limits; otherwise all users share the proxy's bucket.
+# "*" is only safe when the container is not reachable except through that proxy (X-Forwarded-For is spoofable).
+ENV FORWARDED_ALLOW_IPS=127.0.0.1
+
 ENTRYPOINT ["/entrypoint.sh"]
+# One process on purpose: rate limits and the insight cache are in memory. Scale with a bigger instance, not
+# --workers or several replicas (or move those to Redis first).
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
