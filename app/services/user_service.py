@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.security import hash_password, verify_password
 from app.db.models import Profile, User
+from app.schemas.auth import GUEST_EMAIL_DOMAIN
 from app.schemas.user import ProfileOut, ProfileUpdate
 from app.services.health_engine import GOAL_NUTRIENTS, LIMIT_NUTRIENTS, compute_targets
 
@@ -35,7 +36,7 @@ async def register(db: AsyncSession, *, email: str, password: str, name: str) ->
     return user
 
 
-GUEST_EMAIL_DOMAIN = "guest.nutriscan.app"
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
 
 
 def is_guest(user: User) -> bool:
@@ -52,7 +53,10 @@ async def create_guest(db: AsyncSession) -> User:
 async def authenticate(db: AsyncSession, *, email: str, password: str) -> User:
     """Return the user for valid credentials, else INVALID_CREDENTIALS."""
     user = await db.scalar(select(User).where(User.email == email.strip().lower()))
-    if user is None or not verify_password(password, user.password_hash):
+    if user is None:
+        verify_password(password, _DUMMY_HASH)  # same bcrypt cost, so timing doesn't reveal unknown emails
+        raise AppError("INVALID_CREDENTIALS", "Incorrect email or password.", 401)
+    if not verify_password(password, user.password_hash):
         raise AppError("INVALID_CREDENTIALS", "Incorrect email or password.", 401)
     return user
 
