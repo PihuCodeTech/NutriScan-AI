@@ -20,6 +20,7 @@ _ERRORS: dict[str, tuple[int, str]] = {
     "RATE_LIMITED": (429, "Too many requests. Please slow down and try again shortly."),
     "AI_UNAVAILABLE": (503, "The AI service is temporarily unavailable. Please try again."),
     "AI_BAD_RESPONSE": (502, "The AI returned an invalid response. Please try again."),
+    "NOT_READY": (503, "The database is unreachable."),
 }
 
 
