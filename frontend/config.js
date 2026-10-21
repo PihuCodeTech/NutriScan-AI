@@ -1,4 +1,4 @@
-// ScanMyFood web: connection settings for the NutriScan AI backend (FastAPI, /api/v1).
+// NutriScan AI web: connection settings for the NutriScan AI backend (FastAPI, /api/v1).
 window.SMF_CONFIG = {
   // When the backend serves this page (http://localhost:8000/app/), talk to the same origin.
   // When the page is opened some other way (another dev server, file://), fall back to the local backend.
