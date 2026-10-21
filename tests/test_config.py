@@ -85,7 +85,12 @@ def test_engine_kwargs_for_sqlite_and_supabase():
     assert _engine_kwargs("sqlite+aiosqlite:///./x.db") == {"connect_args": {"timeout": 30}}
 
     supabase = _engine_kwargs("postgresql+asyncpg://postgres.ref:pw@aws-0-ap-south-1.pooler.supabase.com:5432/postgres")
-    assert supabase["pool_recycle"] < 300  # reuse connections, recycled before Supavisor drops them
+    # Connections are reused and kept alive by pings well inside Supavisor's idle timeout; recycling is by
+    # *age*, so it must not throw warm connections away every few minutes (each reconnect costs seconds).
+    from app.db.session import KEEPALIVE_INTERVAL_S
+
+    assert KEEPALIVE_INTERVAL_S < 240 and supabase["pool_recycle"] >= 600
+    assert supabase["connect_args"]["timeout"] and supabase["pool_timeout"]  # fail fast, never hang on a dead DB
     assert supabase["connect_args"]["statement_cache_size"] == 0
     ctx = supabase["connect_args"]["ssl"]  # TLS for a remote host, always verified
     assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
