@@ -20,9 +20,22 @@ def rate_limit_key(request: Request) -> str:
     return f"ip:{get_remote_address(request)}"
 
 
+def client_ip_key(request: Request) -> str:
+    """Key by client IP only. For auth endpoints, where a bearer token must not buy a fresh bucket."""
+    return f"ip:{get_remote_address(request)}"
+
+
 def ai_limit() -> str:
     """Current AI limit string (read per request so it can be changed at runtime/tests)."""
     return get_settings().RATE_LIMIT_AI
+
+
+def login_limit() -> str:
+    return get_settings().RATE_LIMIT_LOGIN
+
+
+def register_limit() -> str:
+    return get_settings().RATE_LIMIT_REGISTER
 
 
 limiter = Limiter(key_func=rate_limit_key, storage_uri="memory://", headers_enabled=False)
