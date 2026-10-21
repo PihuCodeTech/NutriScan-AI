@@ -1,6 +1,7 @@
 """Deterministic health logic: daily targets, meal score + flags, and daily status.
 
-Formulas follow docs/05_AI_PIPELINE.md §6 exactly. Nothing here calls an LLM.
+Targets use Mifflin-St Jeor BMR × activity factor ± a goal adjustment, never below a safe calorie floor.
+Nothing here calls an LLM.
 """
 
 from __future__ import annotations
@@ -141,7 +142,7 @@ def _flag(nutrient: str, level: str, value: float, meal_target: float, meal_type
 def score_meal(
     totals: dict[str, Any], daily_targets: dict[str, Any], meal_type: str | None, tips: list[str] | None = None
 ) -> dict[str, Any]:
-    """Meal score 0–100 with flags (§6.2). Returns a `Health` dict (tips passed through).
+    """Meal score 0–100 with flags. Returns a `Health` dict (tips passed through).
 
     When `meal_type` is None or not a known type, a neutral one-third-of-day share is used, so a plate is not
     scored more harshly just because it was scanned at a snack time of day."""
@@ -208,7 +209,7 @@ def remaining(totals: dict[str, Any], targets: dict[str, Any]) -> dict[str, floa
 def daily_status(
     totals: dict[str, Any], targets: dict[str, Any], *, has_entries: bool, day: date, now_local: datetime
 ) -> str:
-    """`no_data` | `over` | `under` | `on_track` (§6.3)."""
+    """Daily status: `no_data` | `over` | `under` | `on_track`."""
     if not has_entries:
         return "no_data"
     pct = {k: (coerce(totals)[k] / v if v > 0 else 0.0) for k, v in coerce(targets).items()}
