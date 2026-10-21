@@ -1,6 +1,6 @@
 """Fine-tune the Food-101 ViT (`nateraw/food`) further on Indian dishes. Transfer learning, step 2.
 
-NOT run during the backend build. Intended for a GPU notebook (Colab / Kaggle). See ml/README.md.
+Not part of the server; run it on a GPU (Colab / Kaggle). See "Fine-tuning the classifier" in README.md.
 
 Data layout (ImageFolder):   ml/data/indian_food/<class_name>/*.jpg
   e.g. the Kaggle "Indian Food Images" dataset (80 classes). Optionally merge a Food-101 subset with
