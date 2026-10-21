@@ -18,6 +18,8 @@ class User(UUIDPk, CreatedAt, Base):
     password_hash: Mapped[str] = mapped_column(String(100))
     name: Mapped[str] = mapped_column(String(100))
 
+    # Joined, not selectin: the user is loaded on every authenticated request, and a second query costs a full
+    # round trip to the database (~400 ms to a far-away Supabase region).
     profile: Mapped[Profile] = relationship(
-        back_populates="user", uselist=False, lazy="selectin", cascade="all, delete-orphan"
+        back_populates="user", uselist=False, lazy="joined", cascade="all, delete-orphan"
     )
