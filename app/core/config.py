@@ -76,8 +76,21 @@ class Settings(BaseSettings):
 
     # Limits
     RATE_LIMIT_AI: str = "20/minute"
+    # Per client IP (not per token, so rotating guest tokens doesn't help): slows password guessing and
+    # stops mass sign-ups that would sidestep the per-user AI limit.
+    RATE_LIMIT_LOGIN: str = "10/minute"
+    RATE_LIMIT_REGISTER: str = "20/hour"
     CHAT_HISTORY_TURNS: int = 20
     CHAT_MAX_TOOL_ROUNDS: int = 4
+
+    # Monitoring (see app/services/monitoring.py and README "Monitoring")
+    # Bearer token for GET /metrics (Prometheus format). Empty = the endpoint is disabled (404).
+    METRICS_TOKEN: str = ""
+    # Slack / Discord incoming-webhook URL for alerts. Empty = alerts are only logged (level ERROR).
+    ALERT_WEBHOOK_URL: str = ""
+    ALERT_REPEAT_MIN: int = 240  # re-send a still-firing alert this often (0 = only once)
+    MONITOR_INTERVAL_S: float = 60.0  # how often the watchdog checks the database and evaluates alert rules
+    GUEST_CLEANUP_INTERVAL_H: float = 24.0  # guest cleanup runs at startup and then this often
 
     @field_validator("PUBLIC_BASE_URL")
     @classmethod
@@ -149,14 +162,43 @@ def shell_overrides() -> list[str]:
     ]
 
 
+_PLACEHOLDER_SECRETS = {"dev-insecure-secret-change-me", "change-me-to-a-long-random-string", ""}
+MIN_PROD_SECRET_CHARS = 32
+
+
 @lru_cache
 def get_settings() -> Settings:
     """Return the process-wide settings instance."""
     settings = Settings()
-    if settings.APP_ENV == "prod" and settings.JWT_SECRET in {
-        "dev-insecure-secret-change-me",
-        "change-me-to-a-long-random-string",
-        "",
-    }:
-        raise RuntimeError("JWT_SECRET must be set to a strong random value when APP_ENV=prod")
+    # JWT_SECRET signs both access tokens and photo URLs: a guessable one lets anyone forge a login.
+    if settings.APP_ENV == "prod" and (
+        settings.JWT_SECRET in _PLACEHOLDER_SECRETS or len(settings.JWT_SECRET) < MIN_PROD_SECRET_CHARS
+    ):
+        raise RuntimeError(
+            f"JWT_SECRET must be a random value of at least {MIN_PROD_SECRET_CHARS} characters when APP_ENV=prod "
+            '(e.g. python -c "import secrets; print(secrets.token_urlsafe(48))")'
+        )
+    if settings.APP_ENV == "prod" and settings.MOCK_AI:
+        raise RuntimeError("MOCK_AI=true serves canned fixtures instead of real analysis; it is not allowed in prod")
     return settings
+
+
+def production_warnings(settings: Settings) -> list[str]:
+    """Misconfigurations that don't stop a prod start but should be fixed (logged as warnings at startup)."""
+    if settings.APP_ENV != "prod":
+        return []
+    warnings = []
+    if "*" in settings.cors_origins_list:
+        warnings.append(
+            "CORS_ORIGINS allows every origin in prod; set it to the frontend's origin(s), "
+            "e.g. CORS_ORIGINS=https://app.example.com"
+        )
+    if not settings.PUBLIC_BASE_URL.startswith("https://") or "localhost" in settings.PUBLIC_BASE_URL:
+        warnings.append(
+            "PUBLIC_BASE_URL is not a public https:// URL; photo links will be broken or blocked as mixed content"
+        )
+    if not settings.GEMINI_API_KEY:
+        warnings.append("GEMINI_API_KEY is empty; every AI endpoint will return 503 AI_UNAVAILABLE")
+    if settings.DATABASE_URL.startswith("sqlite"):
+        warnings.append("DATABASE_URL is SQLite in prod; use PostgreSQL (data lives on one container's disk)")
+    return warnings
