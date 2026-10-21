@@ -1,25 +1,33 @@
-# docker compose up --build   →  API on http://localhost:8000 (docs at /docs), Postgres 16 alongside.
+# Self-hosted stack: API + PostgreSQL 16 + nightly verified backups.
+#   docker compose up --build   →  http://localhost:8000 (docs at /docs)
+# Needs in .env (never committed): POSTGRES_PASSWORD, JWT_SECRET (≥ 32 chars), GEMINI_API_KEY, PUBLIC_BASE_URL,
+# CORS_ORIGINS. Compose refuses to start without POSTGRES_PASSWORD rather than fall back to a known password.
+# Using a managed database (Supabase) instead? Run only the api service and put its DATABASE_URL in .env:
+#   docker compose up --build --no-deps api   (and delete the DATABASE_URL line under api.environment)
+#   Backups are then Supabase's job (see README, "Backups and recovery").
 services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: nutriscan
-      POSTGRES_PASSWORD: nutriscan
-      POSTGRES_DB: nutriscan
+      POSTGRES_USER: ${POSTGRES_USER:-nutriscan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-nutriscan}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nutriscan -d nutriscan"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
+    # No published port: only the api container can reach the database.
 
   api:
     build: .
     env_file: .env
     environment:
       APP_ENV: prod
-      DATABASE_URL: postgresql+asyncpg://nutriscan:nutriscan@db:5432/nutriscan
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nutriscan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-nutriscan}
       STORAGE_DIR: /data/uploads
       HF_HOME: /data/hf-cache
     ports:
@@ -29,6 +37,34 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Dumps the database every BACKUP_INTERVAL_HOURS, proves each dump restores (into a scratch database), archives
+  # the uploaded photos and prunes after BACKUP_RETENTION_DAYS. Files land in ./backups on the host (copy them
+  # off this machine too). Restore: see docker/backup/restore.sh. Gets only the database credentials, not .env.
+  backup:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/backup/loop.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-nutriscan}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PGDATABASE: ${POSTGRES_DB:-nutriscan}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    volumes:
+      - ./docker/backup:/backup:ro
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
+      - appdata:/data:ro       # uploads (read-only; the model cache in it is skipped)
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:               # unhealthy in `docker ps` when the last good backup is too old
+      test: ["CMD", "sh", "/backup/healthcheck.sh"]
+      interval: 10m
+      start_period: 10m
     restart: unless-stopped
 
 volumes:
