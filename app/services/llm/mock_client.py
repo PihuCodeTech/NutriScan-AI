@@ -70,7 +70,7 @@ def rajma_chawal_fixture() -> FoodAnalysisLLM:
             ),
         ],
         tips=[
-            "Add a bowl of curd or a boiled egg for extra protein.",
+            "Add a bowl of curd or some roasted chana for extra protein.",
             "Great fibre from the rajma — keep the salad and go easy on extra salt.",
         ],
     )
@@ -222,7 +222,7 @@ class MockGeminiClient:
         if "sodium_mg" in nutrients:
             tips.append("Skip the extra pickle and papad to cut down on salt.")
         if "protein_g" in nutrients:
-            tips.append("Add a katori of dal, curd or a boiled egg for more protein.")
+            tips.append("Add a katori of dal, curd or sprouts for more protein.")
         tips.append("Add a small salad or a fruit for fibre and freshness.")
         if len(tips) < 2:
             tips.append("Drink a glass of water with your meal.")
@@ -233,12 +233,22 @@ class MockGeminiClient:
         if queued is not None:
             return queued
         pct = day_summary.get("percent_of_target", {}).get("calories", 0)
+        if not day_summary.get("entries"):  # an empty day gets no praise for logging
+            return InsightLLM(
+                headline="Ready when you are",
+                summary="Nothing logged yet today. Scan your first plate to see how it fits your day.",
+                tips=[
+                    "A mess thali with dal and curd is a solid, cheap start.",
+                    "Keep roasted chana or a banana handy for the evening hunger.",
+                    "Keep a water bottle at your desk and sip through the day.",
+                ],
+            )
         return InsightLLM(
-            headline="Nice work logging today!",
+            headline="Nice work logging today!" if pct <= 110 else "A big day so far",
             summary=f"You're at about {pct}% of your calorie target so far. "
             "Keep meals balanced with protein and fibre.",
             tips=[
-                "Add curd, dal or eggs to your next meal for protein.",
+                "Add curd, dal or paneer to your next meal for protein.",
                 "Snack on fruit or roasted chana instead of chips.",
                 "Keep a water bottle at your desk and sip through the day.",
             ],
@@ -312,7 +322,7 @@ class MockGeminiClient:
                 return ChatTurn(
                     text=f"So far today you've had about **{totals.get('calories', 0):.0f} kcal** of your "
                     f"{targets.get('calories', 0):.0f} kcal target, with {totals.get('protein_g', 0):.0f} g protein.\n"
-                    "- Add curd, dal or eggs for protein\n- Keep dinner light and balanced"
+                    "- Add curd, dal or paneer for protein\n- Keep dinner light and balanced"
                 )
             return ChatTurn(text="Here's what I found — let me know if you'd like more detail!")
 
@@ -322,7 +332,8 @@ class MockGeminiClient:
                 "protein. Want me to log it?"
             )
         return ChatTurn(
-            text="Here are some cheap, hostel-friendly ideas:\n- **Protein:** eggs, curd, dal, sprouts, roasted chana\n"
+            text="Here are some cheap, hostel-friendly ideas:\n"
+            "- **Protein:** paneer, curd, dal, sprouts, roasted chana\n"
             "- **Fibre:** fruit, salad, whole-wheat roti\n- **Hydration:** keep a water bottle handy\n"
             "Want ideas tailored to your mess menu?"
         )
