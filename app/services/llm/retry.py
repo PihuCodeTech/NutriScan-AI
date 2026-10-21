@@ -39,7 +39,9 @@ def classify(exc: BaseException) -> str:
     if isinstance(exc, httpx.TransportError):
         return "retry"
     if isinstance(exc, genai_errors.ServerError):
-        return "fallback" if exc.code == 504 else "retry"  # 504 DEADLINE_EXCEEDED = slow model
+        # 503 UNAVAILABLE ("model is experiencing high demand") and 504 DEADLINE_EXCEEDED mean the model is
+        # overloaded or slow; retrying it 1.5 s later rarely helps. Other 5xx are transient: retry once.
+        return "fallback" if exc.code in (503, 504) else "retry"
     if isinstance(exc, genai_errors.ClientError):
         if exc.code == 429:
             # A per-day quota won't come back in 1.5 s; a per-minute one might.
@@ -54,6 +56,14 @@ def classify(exc: BaseException) -> str:
     if isinstance(exc, genai_errors.APIError):
         return "retry" if (exc.code or 0) >= 500 else "fatal"
     return "retry"
+
+
+def should_cool_down(exc: BaseException) -> bool:
+    """True when the failure says the *model* is struggling (overloaded, slow, rate-limited, unreachable or
+    missing), so other requests should go to the other model for a while. A 400 about one request is not."""
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TransportError, genai_errors.ServerError)):
+        return True
+    return isinstance(exc, genai_errors.ClientError) and exc.code in (404, 429)
 
 
 def unavailable(exc: BaseException | None) -> AppError:
