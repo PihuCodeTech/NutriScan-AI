@@ -1,4 +1,4 @@
-"""All prompt templates (docs/05_AI_PIPELINE.md §4)."""
+"""All prompt templates for Gemini: food analysis, text estimates, tips, daily insights and the chatbot."""
 
 from __future__ import annotations
 
