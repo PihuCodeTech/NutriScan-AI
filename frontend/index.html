@@ -3,15 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>ScanMyFood</title>
+  <title>NutriScan AI</title>
   <meta name="description" content="Photograph a meal or a nutrition label, see its estimated calories and nutrients, and cook a healthier swap.">
-  <meta name="theme-color" content="#14352d">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314352d'/%3E%3Crect x='11' y='13' width='42' height='38' rx='6' fill='%239aa89d'/%3E%3Crect x='15' y='17' width='16' height='14' rx='3' fill='%23fff'/%3E%3Crect x='33' y='17' width='16' height='14' rx='3' fill='%23fff'/%3E%3Crect x='15' y='33' width='34' height='14' rx='3' fill='%23fff'/%3E%3Crect x='15' y='39' width='34' height='8' rx='3' fill='%23e8a317'/%3E%3C/svg%3E">
-  <!-- Fonts are optional. Without a connection the page falls back to the system font. -->
+  <meta name="theme-color" content="#0f3b30">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f3b30'/%3E%3Crect x='11' y='13' width='42' height='38' rx='6' fill='%239aa89d'/%3E%3Crect x='15' y='17' width='16' height='14' rx='3' fill='%23fff'/%3E%3Crect x='33' y='17' width='16' height='14' rx='3' fill='%23fff'/%3E%3Crect x='15' y='33' width='34' height='14' rx='3' fill='%23fff'/%3E%3Crect x='15' y='39' width='34' height='8' rx='3' fill='%23e9a521'/%3E%3C/svg%3E">
+  <!-- Fonts are optional and loaded without blocking the first paint: a slow or blocked fonts.googleapis.com
+       used to leave the page blank until the request gave up. Until they arrive, the system font is used. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600;700&display=swap"></noscript>
+  <link rel="stylesheet" href="style.css?v=41">
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -20,31 +22,34 @@
 
   <div class="shell">
     <aside class="side">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"></span>ScanMyFood</div>
+      <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>NutriScan AI</h1>
       <nav id="nav" aria-label="Main">
         <button type="button" data-page="dashboard" data-icon="home"><span class="lbl">Dashboard</span><span class="lbl-s">Today</span></button>
-        <button type="button" data-page="scan" data-icon="camera"><span class="lbl">Scan food</span><span class="lbl-s">Scan</span></button>
         <button type="button" data-page="history" data-icon="history"><span class="lbl">History</span><span class="lbl-s">History</span></button>
+        <button type="button" data-page="scan" data-icon="camera"><span class="lbl">Scan food</span><span class="lbl-s">Scan</span></button>
         <button type="button" data-page="cook" data-icon="cook"><span class="lbl">Cook instead</span><span class="lbl-s">Cook</span></button>
-        <button type="button" data-page="rewards" data-icon="award"><span class="lbl">Rewards</span><span class="lbl-s">Rewards</span></button>
-        <button type="button" data-page="profile" data-icon="user"><span class="lbl">Health profile</span><span class="lbl-s">Profile</span></button>
+        <button type="button" data-page="ask" data-icon="chat"><span class="lbl">Ask NutriBuddy</span><span class="lbl-s">Ask</span></button>
+        <button type="button" class="side-only" data-page="rewards" data-icon="award"><span class="lbl">Rewards</span><span class="lbl-s">Rewards</span></button>
+        <button type="button" class="side-only" data-page="profile" data-icon="user"><span class="lbl">Health profile</span><span class="lbl-s">Profile</span></button>
       </nav>
       <div class="side-foot">
         <div class="who-row"><b id="who">Not signed in</b>
           <button type="button" class="link-btn" data-act="signOut">Sign out</button></div>
         <span id="status" class="status" role="status">Connecting to the server…</span>
+        <!-- Phones: the tab bar holds the five daily pages; the profile lives up here instead -->
+        <button type="button" class="top-profile" data-page="profile" data-icon="user" aria-label="Health profile"></button>
       </div>
     </aside>
 
-    <main id="main" tabindex="-1"></main>
+    <main id="main" tabindex="-1"><p class="sub">Loading NutriScan AI…</p></main>
   </div>
 
-  <noscript><p style="padding:24px">ScanMyFood needs JavaScript to run.</p></noscript>
+  <noscript><p style="padding:24px">NutriScan AI needs JavaScript to run.</p></noscript>
 
-  <script src="config.js?v=7"></script>
-  <script src="data.js?v=7"></script>
-  <script src="api.js?v=7"></script>
-  <script src="auth.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="config.js?v=41"></script>
+  <script src="data.js?v=41"></script>
+  <script src="api.js?v=41"></script>
+  <script src="auth.js?v=41"></script>
+  <script src="app.js?v=41"></script>
 </body>
 </html>
