@@ -17,6 +17,7 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install -r requirements.txt
 
 COPY app ./app
+COPY certs ./certs
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY scripts ./scripts
