@@ -1,4 +1,4 @@
-// ScanMyFood web: app logic and pages.
+// NutriScan AI web: app logic and pages.
 // Load order in index.html: config.js, data.js, api.js, auth.js, app.js
 
 // ---------- Small helpers ----------
@@ -25,13 +25,38 @@ function md(text) {
   return html + (inList ? '</ul>' : '');
 }
 
-let toastTimer;
-function toast(text) {
-  let t = $('#toast');
-  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.append(t); }
-  t.textContent = text;
+let toastTimer, toastExpire = null;
+// A short message at the bottom. With an action (e.g. Undo) it stays longer (8 s), offers one button and
+// takes keyboard focus; the timer pauses while the pointer is over it, and if focus is still on it when it
+// closes, focus goes to `action.refocus()`. A toast that replaces an unanswered one still lets that one expire (e.g. finish a removal).
+function toast(text, action) {
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.remove(), 3200);
+  const before = toastExpire; toastExpire = null; before?.();
+  $('#toast')?.remove();
+  const t = document.createElement('div');
+  t.id = 'toast'; t.setAttribute('role', 'status');
+  t.append(Object.assign(document.createElement('span'), { textContent: text }));
+  document.body.append(t);
+  const close = expired => {
+    clearTimeout(toastTimer);
+    if (toastExpire === done) toastExpire = null;
+    const hadFocus = t.contains(document.activeElement);
+    t.remove();
+    if (expired) action?.expire?.();
+    if (hadFocus) action?.refocus?.()?.focus();
+  };
+  const done = () => close(true);
+  const arm = () => { clearTimeout(toastTimer); toastTimer = setTimeout(done, action ? 8000 : 4000); };
+  if (action) {
+    toastExpire = action.expire ? () => action.expire() : null;
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'toast-act', textContent: action.label });
+    b.onclick = () => { toastExpire = null; close(false); action.run(); };
+    t.append(b);
+    t.addEventListener('pointerenter', () => clearTimeout(toastTimer));
+    t.addEventListener('pointerleave', arm);
+    b.focus();
+  }
+  arm();
 }
 
 // ---------- Icons ----------
@@ -53,6 +78,7 @@ const ICONS = {
   image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 15.5-4.8-4.8-9.2 8.8"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   download: '<path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/>',
+  chat: '<path d="M5.5 5h13a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H11l-4.5 3.5V17h-1a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M8.5 10h7M8.5 13h4.5"/>',
   send: '<path d="M4.5 11.5 20 4l-6.5 16-2.6-6.4Z"/><path d="m10.9 13.6 4.6-4.6"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   trash: '<path d="M4.5 7h15"/><path d="M9.5 7V4.5h5V7"/><path d="m6.5 7 .9 12.5h9.2L17.5 7"/>',
@@ -79,13 +105,14 @@ const loadingTime = since => `${Math.floor((Date.now() - since) / 1000)} s`;
 function loadingHtml(kind, since) {
   return `<div class="loading" role="status" data-kind="${kind}" data-since="${since}">
     <span class="spinner big" aria-hidden="true"></span>
-    <div><b class="loading-msg">${esc(loadingStep(kind, since))}</b><small class="loading-time">${loadingTime(since)}</small></div></div>`;
+    <div><b class="loading-msg">${esc(loadingStep(kind, since))}</b><small class="loading-time" aria-hidden="true">${loadingTime(since)}</small></div></div>`;
 }
 
 // One ticker updates every loading card on screen, so it keeps going if the page is re-rendered meanwhile.
 setInterval(() => document.querySelectorAll('.loading[data-since]').forEach(el => {
   const since = +el.dataset.since;
-  el.querySelector('.loading-msg').textContent = loadingStep(el.dataset.kind, since);
+  const msg = el.querySelector('.loading-msg'), next = loadingStep(el.dataset.kind, since);
+  if (msg.textContent !== next) msg.textContent = next; // re-setting the same text would be re-announced
   el.querySelector('.loading-time').textContent = loadingTime(since);
 }), 1000);
 
@@ -104,13 +131,15 @@ function busyButton(btn, on, label) {
 }
 
 // ---------- State (saved per person in localStorage) ----------
-const DEFAULT_PROFILE = { name: '', age: 20, sex: 'other', weight: 65, height: 170, activity: 'light', goal: 2000, goalDir: 'maintain', diet: 'Vegetarian', kitchen: 'burner' };
+const DEFAULT_PROFILE = { name: '', age: 20, sex: 'other', weight: 65, height: 170, activity: 'light', goal: 2000, goalDir: 'maintain', diet: 'Vegetarian', kitchen: 'burner', allergies: [] };
 let state;
 let scan = { file: null, url: '', mode: 'meal', result: null, chat: [], added: false, busy: false, since: 0 };
 let cook = { pantry: '', results: null, busy: false, since: 0, focus: '' };
 let ui = { histFilter: 'all' };
 // Numbers the server owns (goals and the street-free streak), so the UI agrees with the AI. null = not loaded.
 let serverTargets = null, serverStreak = null;
+// 'profile' or 'default': whether the server's goals come from the person's own age, height and weight.
+let serverBasis = null;
 
 const storeKey = () => 'smf:' + authUid();
 
@@ -173,7 +202,7 @@ function level(pts) {
   return { n, name: LEVELS[Math.min(n - 1, LEVELS.length - 1)], into: pts % 100 };
 }
 const claimable = () => Math.floor(streakDays() / 7) > state.claims.filter(t => t >= runStart()).length;
-const badgeCtx = () => ({ streak: streakDays(), home: homeCount(), labelScans: state.stats.labelScans });
+const badgeCtx = () => ({ streak: streakDays(), home: homeCount(), labelScans: state.stats.labelScans, scans: state.stats.mealScans + state.stats.labelScans });
 
 function checkBadges(silent) {
   const ctx = badgeCtx();
@@ -194,10 +223,11 @@ function targets() {
 
 // Pull the server-computed targets and street-free streak; the dashboard and rewards read these.
 async function refreshServerNumbers() {
-  if (!signedIn()) { serverTargets = null; serverStreak = null; return; }
+  if (!signedIn()) { serverTargets = null; serverStreak = null; serverBasis = null; return; }
   try {
     const t = await fetchTargets();
     if (t && t.calories) serverTargets = { cal: Math.round(t.calories), protein: Math.round(t.protein_g), carbs: Math.round(t.carbohydrates_g), fat: Math.round(t.fat_g) };
+    if (t && t.basis) serverBasis = t.basis;
   } catch { /* offline: keep the local estimate */ }
   try {
     const sum = await fetchSummary(7);
@@ -211,7 +241,10 @@ function insights(today) {
   const cal = sum(today, 'cal');
   const known = key => today.filter(m => has(m[key]));
   if (!today.length) out.push({ tone: 'info', text: 'Nothing logged today. Scan your first meal to get feedback.' });
-  if (today.some(m => m.street)) out.push({ tone: 'warn', text: 'You had street food today, so your streak restarts. Make the next meal vegetables and protein, and try a home swap tomorrow.' });
+  if (today.some(m => m.street)) {
+    const best = bestStreak();
+    out.push({ tone: 'info', text: `Street food today, so a fresh street-free run starts${best ? ` (your best so far: ${best} day${best === 1 ? '' : 's'})` : ''}. A plate with dal, curd or sprouts next balances it out.` });
+  }
   if (cal > tg.cal) out.push({ tone: 'warn', text: `You are ${Math.round(cal - tg.cal)} kcal over your goal for today. Keep the rest of the day to fruit, curd or salad.` });
   else if (cal > tg.cal * 0.9) out.push({ tone: 'info', text: 'You are close to your calorie goal for the day. Choose something light for the rest of it.' });
   if (known('sodium').length && sum(today, 'sodium') > 2000) out.push({ tone: 'warn', text: `Sodium is at ${Math.round(sum(today, 'sodium'))} mg today, past the 2000 mg daily limit. Skip packaged snacks and pickles, and drink water.` });
@@ -246,7 +279,11 @@ function bodyImpact() {
   const fibreText = fibre === null ? 'Not enough fibre data yet.' : `Fibre averages ${Math.round(fibre)} g a day (aim for ~25 g). Dal, vegetables, fruit and sprouts help.`;
 
   const friedL = oily >= 4 ? 2 : oily >= 2 ? 1 : 0;
-  const friedText = `${oily} fried or street meal${oily === 1 ? '' : 's'} this week${street ? `, ${street} of them street food` : ''}. Deep-fried food eaten often is worth cutting back.`;
+  const meals = n => (n === 1 ? 'meal' : 'meals');
+  const friedCount = !oily ? 'No fried or street meals this week'
+    : street === oily ? `${street} street ${meals(street)} this week`
+    : `${oily} fried or street ${meals(oily)} this week${street ? `, ${street} from the street` : ''}`;
+  const friedText = `${friedCount}. Deep-fried food eaten often is worth cutting back.`;
 
   return [
     { label: 'Salt', level: salt, text: saltText },
@@ -270,20 +307,23 @@ function weekChart() {
   const days = [...Array(7)].map((_, i) => {
     const d = Date.now() - (6 - i) * DAY;
     const list = state.meals.filter(m => sameDay(m.at, d));
-    return { label: new Date(d).toLocaleDateString('en', { weekday: 'short' }), cal: sum(list, 'cal'), street: list.some(m => m.street) };
+    return { label: new Date(d).toLocaleDateString('en', { weekday: 'short' }), cal: sum(list, 'cal'), streetCal: sum(list.filter(m => m.street), 'cal') };
   });
   const top = Math.max(goal, ...days.map(d => d.cal)) * 1.12;  // headroom for the value labels
-  const cols = days.map(d => `<div class="bar-col" title="${d.label}: ${Math.round(d.cal)} kcal${d.street ? ', street food' : ''}">
-      ${d.cal ? `<small class="bar-v num">${Math.round(d.cal)}</small>` : ''}<span class="bar ${d.street ? 'street' : ''}" style="height:${d.cal / top * 100}%"></span></div>`).join('');
+  // One street snack shouldn't paint the whole day: only its share of the bar is tinted.
+  const streetNote = d => d.streetCal ? `, ${Math.round(d.streetCal)} kcal of it street food` : '';
+  const cols = days.map(d => `<div class="bar-col" title="${d.label}: ${Math.round(d.cal)} kcal${streetNote(d)}">
+      ${d.cal ? `<small class="bar-v num">${Math.round(d.cal)}</small>` : ''}<span class="bar" style="height:${d.cal / top * 100}%">${d.streetCal ? `<i class="bar-street" style="height:${d.streetCal / d.cal * 100}%"></i>` : ''}</span></div>`).join('');
   const empty = days.every(d => !d.cal)
     ? '<p class="chart-empty">No meals logged in the last 7 days. Scan or log a meal and it shows up here.</p>' : '';
-  const summary = days.map(d => `${d.label} ${Math.round(d.cal)} kcal${d.street ? ' (street food)' : ''}`).join(', ');
+  const summary = days.map(d => `${d.label} ${Math.round(d.cal)} kcal${d.streetCal ? ` (${Math.round(d.streetCal)} kcal street food)` : ''}`).join(', ');
   return `<div class="bars" role="img" aria-label="Calories over the last 7 days against your goal of ${goal} kcal: ${summary}.">
     <div class="bars-plot" aria-hidden="true"><span class="goal-line" style="bottom:${goal / top * 100}%"></span>${cols}${empty}</div>
     <div class="bars-x" aria-hidden="true">${days.map(d => `<span>${d.label}</span>`).join('')}</div></div>`;
 }
 
-const dots = streak => `<div class="dots" aria-hidden="true">${[...Array(7)].map((_, i) => `<i class="${i < streak ? 'full' : ''}"></i>`).join('')}</div>`;
+// Filled dots are street-free days; the next one is today, in progress.
+const dots = streak => `<div class="dots" aria-hidden="true">${[...Array(7)].map((_, i) => `<i class="${i < streak % 7 || (streak && streak % 7 === 0) ? 'full' : i === streak % 7 ? 'now' : ''}"></i>`).join('')}</div>`;
 
 function impactHtml() {
   const rows = bodyImpact();
@@ -295,6 +335,20 @@ function impactHtml() {
     <p class="sub small">Patterns from the meals you logged this week — general guidance, not medical advice. Log every meal for a fairer picture.</p>`;
 }
 
+const MEAL_LABEL = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snack' };
+
+// A removed meal waits here during the Undo window; it is deleted on the server when the window closes,
+// another meal is removed, or the page is closed (keepalive lets that last request finish).
+let pendingRemoval = null;
+function flushRemoval(keepalive = false) {
+  const m = pendingRemoval;
+  pendingRemoval = null;
+  if (m && m.synced && !m.sample && canSync()) {
+    deleteMeal(m.remoteId || m.id, keepalive).then(() => refreshServerNumbers()).catch(() => {});
+  }
+}
+window.addEventListener('pagehide', () => flushRemoval(true));
+
 // ---------- Pages ----------
 function dashboard() {
   const today = todayMeals(), tg = targets(), streak = streakDays();
@@ -302,24 +356,67 @@ function dashboard() {
   const sample = state.sample ? `<div class="banner">${icon('info')}<div>These are sample meals so the dashboard is not empty. <button class="btn small secondary" data-act="clearMeals">Clear sample data and start fresh</button></div></div>` : '';
   return `${sample}<header class="page-head"><div><h2>Today${name}</h2><p class="sub">${new Date().toLocaleDateString('en', { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
     <button class="btn accent" data-page="scan">${icon('camera')}Scan a meal</button></header>
+  ${needsSetup() ? setupHtml() : ''}
   <section class="tray" role="group" aria-label="Today's nutrition against your goals">
-    ${cell('Calories', sum(today, 'cal'), tg.cal, ' kcal', 'var(--turmeric)')}
-    ${cell('Protein', sum(today, 'protein'), tg.protein, 'g', 'var(--leaf)')}
-    ${cell('Carbs', sum(today, 'carbs'), tg.carbs, 'g', 'var(--sky)')}
-    ${cell('Fat', sum(today, 'fat'), tg.fat, 'g', 'var(--chili)')}
+    ${cell('Calories', sum(today, 'cal'), tg.cal, ' kcal', 'var(--m-cal)')}
+    ${cell('Protein', sum(today, 'protein'), tg.protein, 'g', 'var(--m-protein)')}
+    ${cell('Carbs', sum(today, 'carbs'), tg.carbs, 'g', 'var(--m-carbs)')}
+    ${cell('Fat', sum(today, 'fat'), tg.fat, 'g', 'var(--m-fat)')}
   </section>
+  ${defaultGoals() ? `<p class="tray-note">Goals are a general ${tg.cal.toLocaleString('en-IN')} kcal default for now. <a href="#profile" data-page="profile">Add your age, height and weight</a> to get your own.</p>` : ''}
   <div class="dash-grid">
-    ${signedIn() ? `<section class="card ai-insight" id="ai-insight"><h3>Today's AI insight</h3>${skeleton(3)}</section>` : ''}
+    <section class="card today-read"><h3>Today so far</h3>
+      ${signedIn() ? `<div id="ai-insight">${skeleton(3)}</div>` : ''}
+      ${today.length || !signedIn() ? `${signedIn() ? '<h4>From your log</h4>' : ''}
+      <ul class="checks">${insights(today).map(i => `<li class="${i.tone}">${icon({ warn: 'alert', good: 'check' }[i.tone] || 'info')}<span>${esc(i.text)}</span></li>`).join('')}</ul>` : ''}</section>
+    ${todayMealsHtml(today)}
+    <section class="card chart-card"><h3>Last 7 days</h3>${weekChart()}
+      <p class="legend"><span class="key leaf"></span>Calories <span class="key chili"></span>Street food <span class="key goal"></span>Your goal</p></section>
     <section class="card streak-card"><h3>Street-free streak</h3><p class="big num">${streak} <span>${streak === 1 ? 'day' : 'days'}</span></p>
       ${dots(streak)}
-      <p class="sub">${claimable() ? 'Your weekly reward is ready to claim.' : streak >= 7 ? 'Weekly reward claimed. Keep going for the next one.' : (7 - streak) + ' more days to your weekly reward.'}</p>
+      <p class="sub">${claimable() ? 'Your weekly reward is ready to claim.' : streak >= 7 ? 'Weekly reward claimed. Keep going for the next one.' : streak === 0 ? `A new run starts today. ${bestStreak() ? `Best so far: ${bestStreak()} days.` : 'Seven street-free days earn the weekly reward.'}` : (7 - streak) + ' more days to your weekly reward.'}</p>
       <button class="btn secondary" data-page="rewards">See rewards</button></section>
-    <section class="card chart-card"><h3>Last 7 days</h3>${weekChart()}
-      <p class="legend"><span class="key leaf"></span>Calories <span class="key chili"></span>Street food day <span class="key goal"></span>Your goal</p></section>
-    <section class="card"><h3>Quick checks</h3><p class="sub small">Calculated from your log and goals.</p>
-      <ul class="checks">${insights(today).map(i => `<li class="${i.tone}">${icon({ warn: 'alert', good: 'check' }[i.tone] || 'info')}<span>${esc(i.text)}</span></li>`).join('')}</ul></section>
     <section class="card wide"><h3>This week's eating patterns</h3>${impactHtml()}</section>
   </div>`;
+}
+
+// What was eaten today, newest last, each one tap from being logged again. On an empty day it offers the
+// last few different meals instead ("same as yesterday's mess lunch").
+function todayMealsHtml(today) {
+  const row = m => `<li><div><b>${esc(m.name)}</b><small class="num">${MEAL_LABEL[m.mealType || mealTypeAt(m.at)] || 'Meal'} · ${Math.round(m.cal)} kcal</small></div>
+      <button class="btn small secondary" data-act="relog" data-id="${esc(m.id)}" aria-label="Log ${esc(m.name)} again">Log again</button></li>`;
+  const seen = new Set();
+  const recent = [...state.meals].filter(m => !m.sample).sort((a, b) => b.at - a.at)
+    .filter(m => !seen.has(m.name.toLowerCase()) && seen.add(m.name.toLowerCase())).slice(0, 3);
+  const body = today.length
+    ? `<ul class="mini-meals">${[...today].sort((a, b) => a.at - b.at).slice(-5).map(row).join('')}</ul>`
+    : recent.length
+      ? `<p class="sub small">Nothing logged yet today. Had one of these again?</p><ul class="mini-meals">${recent.map(row).join('')}</ul>`
+      : `<p class="sub">No meals yet today.</p><button class="btn small secondary" data-page="history">${icon('plus')}Log a meal by hand</button>`;
+  return `<section class="card meals-card"><h3>Today's meals</h3>${body}
+    ${today.length || recent.length ? '<button class="btn ghost small see-all" data-page="history">See all in History</button>' : ''}</section>`;
+}
+
+// ---------- First run ----------
+// Three choices change what every scan, tip and meal idea suggests, so a new account is asked for them once,
+// on the dashboard, pre-filled with the defaults already in use. Body numbers (for calorie goals) stay in the
+// Health profile; until they are there, the tray says its goals are a default.
+const SETUP_CHOICES = {
+  diet: ['Diet', { Vegetarian: 'Vegetarian', Eggetarian: 'Eggetarian', 'Non-vegetarian': 'Non-veg', Vegan: 'Vegan' }],
+  kitchen: ['Kitchen in your room', { none: 'No cooking', kettle: 'Kettle only', burner: 'Burner' }],
+  goalDir: ['Weight goal', { lose: 'Lose', maintain: 'Maintain', gain: 'Gain' }],
+};
+const needsSetup = () => !state.setupDone && !state.profileTouched;
+const defaultGoals = () => (serverBasis ? serverBasis === 'default' : !state.profileTouched);
+
+function setupHtml() {
+  const p = state.profile;
+  const group = ([key, [label, opts]]) => `<fieldset class="setup-q"><legend>${label}</legend><div class="segmented seg-${Object.keys(opts).length}">${Object.entries(opts)
+    .map(([v, t]) => `<label><input type="radio" name="setup-${key}" value="${esc(v)}" ${v === p[key] ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></fieldset>`;
+  return `<section class="card setup" aria-labelledby="setup-title"><h3 id="setup-title">How do you eat?</h3>
+    <p class="sub">Scans, tips and meal ideas follow these. Change them any time in Health profile.</p>
+    <div class="setup-grid">${Object.entries(SETUP_CHOICES).map(group).join('')}</div>
+    <div class="actions"><button class="btn" data-act="saveSetup">Save choices</button><button class="btn ghost" data-act="skipSetup">Skip for now</button></div></section>`;
 }
 
 // Grey placeholder lines while text loads, so the card keeps its shape.
@@ -329,7 +426,7 @@ function fitLine(f) {
   const tg = targets(), left = Math.round(tg.cal - sum(todayMeals(), 'cal'));
   const pct = Math.round(f.cal / tg.cal * 100);
   if (!f.cal) return '';
-  return `${esc(f.name)} is about ${pct}% of your daily goal. ` + (f.cal > left
+  return `About ${pct}% of your daily calories. ` + (f.cal > left
     ? `That is more than the ${Math.max(0, left)} kcal you have left today.`
     : `That leaves ${left - f.cal} kcal for the rest of the day.`);
 }
@@ -339,23 +436,26 @@ function healthHtml(f) {
   if (!h) return '';
   const tone = { green: 'var(--leaf)', amber: 'var(--turmeric)', red: 'var(--chili)' }[h.color] || 'var(--leaf)';
   const label = { good: 'Good', moderate: 'Moderate', needs_attention: 'Needs attention' }[h.label] || h.label;
-  return `<div class="score" style="--tone:${tone}" aria-label="Health score ${h.score} out of 100, ${esc(label)}"><b class="num">${h.score}</b><span>/100</span><small>${esc(label)}</small></div>`;
+  return `<div class="score" style="--tone:${tone}" role="img" aria-label="Health score ${h.score} out of 100, ${esc(label)}"><b class="num">${h.score}</b><span>/100</span><small>${esc(label)}</small></div>`;
 }
 
-function itemsHtml(f) {
+function itemsHtml(f, subtitle = '') {
   if (!f.items || !f.items.length) return '';
   const conf = { high: '', medium: ' <small class="pill warn">medium confidence</small>', low: ' <small class="pill bad">low confidence</small>' };
   const src = s => s === 'table' ? ' <small class="pill ok" title="Nutrients from a curated food database (IFCT/USDA)">DB</small>' : ' <small class="pill" title="Nutrients estimated by the AI">AI est.</small>';
-  return `<h4>What is on the plate</h4><ul class="items">${f.items.map(i => `<li><span><span class="item-name">${esc(i.name)}</span>${conf[i.confidence] || ''}${src(i.nutritionSource)}<small>${esc(i.serving || i.grams + ' g')}</small></span><b class="num">${i.cal} kcal</b></li>`).join('')}</ul>`;
+  return `<h4>What is on the plate</h4>${subtitle}<ul class="items">${f.items.map(i => `<li><span><span class="item-name">${esc(i.name)}</span>${conf[i.confidence] || ''}${src(i.nutritionSource)}<small>${esc(i.serving || i.grams + ' g')}</small></span><b class="num">${i.cal} kcal</b></li>`).join('')}</ul>`;
 }
 
 function resultHtml() {
   const f = scan.result;
   if (f.error) return `<div class="banner warn" role="alert">${icon('alert')}<div>${esc(f.error)}</div></div>`;
-  const n = (label, v, unit) => `<div><small>${label}</small><b class="num">${dash(v)}${has(v) ? `<span class="unit">${unit}</span>` : ''}</b></div>`;
+  // The four macros carry the dashboard tray's colours, so the same nutrient looks the same everywhere.
+  const n = (label, v, unit, tone) => `<div ${tone ? `style="--tone:${tone}"` : ''}><small>${label}</small><b class="num">${dash(v)}${has(v) ? `<span class="unit">${unit}</span>` : ''}</b></div>`;
   const risk = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' };
-  const guess = f.classifier?.predictions?.length
-    ? `<p class="sub small">Image model's first guess: ${esc(f.classifier.predictions[0].display_name)} (${Math.round(f.classifier.predictions[0].score * 100)}%). The AI then checked every item on the plate.</p>` : '';
+  // The two-stage pipeline, said where the items are: the image model's guess, then Gemini reads every item.
+  const top = f.classifier?.predictions?.[0];
+  const pipeline = top
+    ? `<p class="pipeline">${icon('image')}<span>Image model's first guess: <b>${esc(top.display_name)}</b> (${Math.round(top.score * 100)}%). Gemini then read every item on the plate.</span></p>` : '';
   const list = (items, kind, none) => `<ul class="${kind}">${items.map(t => `<li>${icon(kind === 'tips' ? 'check' : 'alert')}<span>${esc(t)}</span></li>`).join('') || `<li class="none">${none}</li>`}</ul>`;
   const lists = f.health
     ? `<div class="lists"><div><h4>Watch out</h4>${list(f.cons, 'flags', 'Nothing flagged for this meal')}</div>
@@ -363,54 +463,108 @@ function resultHtml() {
        <p class="sub small">${esc(f.health.disclaimer || 'Estimates only — not medical advice.')}</p>`
     : `<div class="lists"><div><h4>Advantages</h4>${list(f.pros, 'tips', 'None found')}</div>
        <div><h4>Disadvantages</h4>${list(f.cons, 'flags', 'None found')}</div></div>`;
-  return `<article class="card result"><div class="result-head"><div><h3>${esc(f.name)}</h3><span class="tag ${f.street ? 'bad' : ''}">${f.street ? 'Street food' : 'Not street food'}</span></div>${healthHtml(f)}</div>
+  const photo = scan.url || f.imageUrl;
+  // Verdict (this plate, its score, how it fits the day) → decision (log it / find a swap) → what is on the
+  // plate → the numbers and advice. Rarely needed detail (fibre, sodium, sugar) is folded away.
+  return `<article class="card result"><div class="result-head">
+      ${photo ? `<img class="result-thumb" src="${esc(photo)}" alt="">` : ''}
+      <div class="result-title"><h3 tabindex="-1">${esc(f.name)}</h3><span class="tag bad" ${f.street ? '' : 'hidden'}>Street food</span></div>
+      ${healthHtml(f)}</div>
     <p class="fit">${fitLine(f)}</p>
-    <div class="nutri">${n('Calories', f.cal, ' kcal')}${n('Protein', f.protein, 'g')}${n('Carbs', f.carbs, 'g')}${n('Fat', f.fat, 'g')}${n('Fibre', f.fibre, 'g')}${n('Sodium', f.sodium, 'mg')}${n('Sugar', f.sugar, 'g')}</div>
-    ${f.items ? itemsHtml(f) : `<p class="sub">${esc(f.summary)}</p>`}
-    ${guess}
+    ${f.health ? `<details class="how score-how"><summary>How is the health score worked out?</summary>
+      <p>The app starts at 100 and takes points off when salt, sugar, saturated fat or calories go over this meal's share of your day, or when protein or fibre fall short. It is worked out from this plate's nutrients; the AI doesn't pick the score.</p></details>` : ''}
+    <div class="result-act" id="result-act">${resultActHtml()}</div>
+    <section class="plate">${f.items ? itemsHtml(f, pipeline) : `<p class="sub">${esc(f.summary)}</p>${pipeline}`}
+      <label class="check street-check"><input type="checkbox" data-act="toggleStreet" ${f.street ? 'checked' : ''}> Bought from a stall or cart? This is street food</label></section>
+    <div class="nutri macros4">${n('Calories', f.cal, ' kcal', 'var(--m-cal)')}${n('Protein', f.protein, 'g', 'var(--m-protein)')}${n('Carbs', f.carbs, 'g', 'var(--m-carbs)')}${n('Fat', f.fat, 'g', 'var(--m-fat)')}</div>
+    <details class="how more-nutri"><summary>Fibre, sodium and sugar</summary>
+      <div class="nutri extras">${n('Fibre', f.fibre, 'g')}${n('Sodium', f.sodium, 'mg')}${n('Sugar', f.sugar, 'g')}</div></details>
     ${f.ingredients.length ? `<div class="chips" aria-label="Ingredients by risk">${f.ingredients.map(i => `<span class="chip ${i.risk}">${esc(i.name)}<small> ${risk[i.risk]}</small></span>`).join('')}</div>` : ''}
-    ${lists}
-    <div class="result-foot"><label class="check"><input type="checkbox" data-act="toggleStreet" ${f.street ? 'checked' : ''}> This is street food</label>
-    <div class="actions"><button class="btn" data-act="addMeal" ${scan.added ? 'disabled' : ''}>${scan.added ? icon('check') + 'Added to your log' : icon('plus') + 'Add to my log'}</button>
-    <button class="btn secondary" data-act="swapFor">${icon('swap')}Find a home swap</button></div></div></article>
+    ${lists}</article>
     <section class="card chat-card"><h3>Ask about this food</h3><div class="chat"><div class="msgs" id="msgs" aria-live="polite">${chatHtml()}</div>
-    <div class="chips">${['Is it bad for my liver?', 'Is this enough protein for me?', 'What can I eat instead?'].map(q => `<button class="chip btn-chip" data-act="ask" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
-    <div class="ask"><input id="q" placeholder="Is it bad for my skin or kidneys?" aria-label="Question about this food"><button class="btn" data-act="send" aria-label="Ask">${icon('send')}<span class="ask-lbl">Ask</span></button></div></div></section>`;
+    <div class="chips">${['How can I make this healthier?', 'Is this enough protein for me?', 'What can I eat instead?'].map(q => `<button class="chip btn-chip" data-act="ask" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+    <div class="ask"><input id="q" placeholder="Can I eat this every day?" aria-label="Question about this food"><button class="btn" data-act="send" aria-label="Ask">${icon('send')}<span class="ask-lbl">Ask</span></button></div></div></section>`;
 }
 
-function chatHtml() {
-  if (!scan.chat.length) return '<p class="sub chat-empty">Ask about benefits, risks or healthier options.</p>';
-  return scan.chat.map(m => `<div class="msg ${m.me ? 'me' : ''} ${m.markdown ? 'md' : ''} ${m.error ? 'err' : ''} ${m.pending ? 'pending' : ''}" ${m.error ? 'role="alert"' : ''}>${m.pending ? '<span class="spinner" aria-hidden="true"></span>' : ''}${m.markdown ? md(m.text) : esc(m.text)}${(m.tools || []).map(t => `<small class="tool">${icon('check')}${esc(t.summary)}</small>`).join('')}</div>`).join('');
+// The decision row. Once the plate is logged it becomes a small day bar: what you had before (soft) and what
+// this plate added (saffron, filling in), so logging lands somewhere you can see.
+function resultActHtml(from) {
+  if (!scan.added) {
+    return `<div class="actions"><button class="btn accent" data-act="addMeal">${icon('plus')}Add to my log</button>
+      <button class="btn secondary" data-act="swapFor">${icon('swap')}Find a home swap</button></div>`;
+  }
+  const goal = targets().cal, now = Math.round(sum(todayMeals(), 'cal'));
+  const before = from ?? now - Math.round(scan.result.cal || 0);
+  const pct = v => Math.max(0, Math.min(100, v / goal * 100));
+  const left = goal - now;
+  return `<div class="day-fill" role="status">
+      <p><b class="num">${icon('check')}Added. Today: ${now} / ${goal} kcal</b><span class="sub">${left >= 0 ? `${left} kcal left for the day` : `${-left} kcal over today's goal`}</span></p>
+      <div class="day-bar" aria-hidden="true"><i class="was" style="width:${pct(before)}%"></i><i class="now" style="left:${pct(before)}%;--to:${pct(now) - pct(before)}%"></i></div></div>
+    <div class="actions"><button class="btn secondary" data-act="swapFor">${icon('swap')}Find a home swap</button><button class="btn ghost" data-page="dashboard">See today</button></div>`;
+}
+
+function chatHtml(list = scan.chat) {
+  if (!list.length) return '<p class="sub chat-empty">Ask about portions, protein or cheaper, healthier options. The AI knows your profile and what you’ve eaten today.</p>';
+  return list.map(m => `<div class="msg ${m.me ? 'me' : ''} ${m.markdown ? 'md' : ''} ${m.error ? 'err' : ''} ${m.pending ? 'pending' : ''}" ${m.error ? 'role="alert"' : ''}>${m.pending ? '<span class="spinner" aria-hidden="true"></span>' : ''}${m.markdown ? md(m.text) : esc(m.text)}${(m.tools || []).map(t => `<small class="tool">${icon('check')}${esc(t.summary)}</small>`).join('')}</div>`).join('');
 }
 
 // What the result column shows before the first scan.
 const resultSlot = () => scan.busy ? loadingHtml('scan', scan.since) : scan.result ? resultHtml()
   : `<div class="result-empty">${icon('image')}<p>Your results show up here: calories and nutrients for every item on the plate, a health score and tips.</p></div>`;
 
+// ---------- Ask (general chat, no scan needed) ----------
+const askThread = { chat: [], busy: false };
+const ASK_STARTERS = ['A cheap high-protein breakfast I can make', 'How am I doing today?', 'Light dinner ideas with just a kettle'];
+
+function askPage() {
+  return `<header class="page-head"><div><h2>Ask NutriBuddy</h2><p class="sub">Food questions, answered with your profile, goals and today's meals in mind. It can also log a meal for you.</p></div></header>
+  <section class="card chat-card ask-card"><div class="chat"><div class="msgs" id="msgs" aria-live="polite">${chatHtml(askThread.chat)}</div>
+    <div class="chips">${ASK_STARTERS.map(q => `<button class="chip btn-chip" data-act="ask" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+    <div class="ask"><input id="q" placeholder="Is Maggi okay twice a week?" aria-label="Your question"><button class="btn" data-act="send" aria-label="Ask">${icon('send')}<span class="ask-lbl">Ask</span></button></div></div>
+    <p class="sub small">Estimates only — not medical advice.</p></section>`;
+}
+
+// The scan button follows the task: disabled until there is a photo, the turmeric action while there is one to
+// analyze, and a quiet "Scan another photo" once a result is showing (then "Add to my log" is the action).
+function analyzeBtnHtml() {
+  if (scan.busy) return `<button class="btn accent wide" data-act="analyze" id="analyze" disabled aria-busy="true"><span class="spinner" aria-hidden="true"></span>Analyzing…</button>`;
+  if (scan.result && !scan.result.error) return `<button class="btn secondary wide" data-act="scanAnother" id="analyze">${icon('camera')}Scan another photo</button>`;
+  const label = scan.result?.error ? 'Try again' : 'Analyze'; // after a failed scan, the same photo can be retried
+  return `<button class="btn accent wide" data-act="analyze" id="analyze" ${scan.file ? '' : 'disabled aria-describedby="analyze-hint"'}>${label}</button>
+    ${scan.file ? '' : '<small id="analyze-hint" class="analyze-hint">Choose a photo to start.</small>'}`;
+}
+
+function refreshAnalyze() {
+  const slot = $('#analyze-slot');
+  if (slot) slot.innerHTML = analyzeBtnHtml();
+}
+
 function scanPage() {
   return `<header class="page-head"><div><h2>Scan food</h2><p class="sub">Photograph a whole meal or the nutrition label on a packet.</p></div></header>
   <div class="scan-layout">
   <section class="card scan-input">
-    <fieldset class="segmented"><legend class="sr">What are you scanning?</legend>
-      <label><input type="radio" name="mode" value="meal" ${scan.mode === 'meal' ? 'checked' : ''}><span>Whole meal</span></label>
-      <label><input type="radio" name="mode" value="label" ${scan.mode === 'label' ? 'checked' : ''}><span>Product label</span></label></fieldset>
-    <label class="field">Which meal is this?
-      <select id="meal-type">
-        <option value="auto">Not sure / general</option>
-        <option value="breakfast">Breakfast</option>
-        <option value="lunch">Lunch</option>
-        <option value="dinner">Dinner</option>
-        <option value="snack">Snack</option>
-      </select>
-      <small>Used to score the plate against that meal's share of your day. "Not sure" scores it neutrally.</small>
-    </label>
     <label class="drop ${scan.url ? 'has-img' : ''}"><input type="file" id="file" class="sr" accept="image/*">
       <img id="preview" class="preview" alt="Selected food" ${scan.url ? `src="${scan.url}"` : 'hidden'}>
       <span class="drop-cta">${icon('camera')}<b class="drop-title">Choose a photo, take one, or drop it here</b><b class="drop-change">Choose another photo</b></span>
       <small id="fname">${scan.file ? esc(scan.file.name) : 'JPG, PNG or WebP'}</small></label>
-    <button class="btn accent wide" data-act="analyze" id="analyze" ${scan.busy ? 'disabled aria-busy="true"' : ''}>${scan.busy ? '<span class="spinner" aria-hidden="true"></span>Analyzing…' : 'Analyze'}</button>
+    <div class="scan-options">
+      <fieldset class="segmented"><legend class="sr">What are you scanning?</legend>
+        <label><input type="radio" name="mode" value="meal" ${scan.mode === 'meal' ? 'checked' : ''}><span>Whole meal</span></label>
+        <label><input type="radio" name="mode" value="label" ${scan.mode === 'label' ? 'checked' : ''}><span>Product label</span></label></fieldset>
+      <label class="field">Which meal is this?
+        <select id="meal-type">
+          <option value="auto">Not sure / general</option>
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="dinner">Dinner</option>
+          <option value="snack">Snack</option>
+        </select>
+        <small>The score compares the plate with that meal's share of your day (lunch gets the most, a snack the least). Not sure? It's compared with a third of your day.</small>
+      </label>
+    </div>
+    <div class="analyze-slot" id="analyze-slot">${analyzeBtnHtml()}</div>
   </section>
-  <div id="result" class="scan-output" aria-live="polite">${resultSlot()}</div>
+  <p id="scan-said" class="sr-only" role="status"></p><div id="result" class="scan-output">${resultSlot()}</div>
   </div>`;
 }
 
@@ -424,7 +578,7 @@ function historyPage() {
     groups[groups.length - 1].meals.push(m);
   });
   const row = m => `<li class="row"><div><div class="row-title"><b>${esc(m.name)}</b>${m.street ? '<span class="tag bad">Street</span>' : ''}${m.home ? '<span class="tag">Home cooked</span>' : ''}</div>
-      <small class="num">${new Date(m.at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' })} · ${Math.round(m.cal)} kcal · protein ${m.protein}g · carbs ${m.carbs}g · fat ${m.fat}g</small></div>
+      <small class="num">${MEAL_LABEL[m.mealType || mealTypeAt(m.at)] || 'Meal'} · ${new Date(m.at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' })} · ${Math.round(m.cal)} kcal · protein ${m.protein}g · carbs ${m.carbs}g · fat ${m.fat}g</small></div>
       <button class="btn ghost danger small" data-act="remove" data-id="${esc(m.id)}" aria-label="Remove ${esc(m.name)}">${icon('trash')}<span>Remove</span></button></li>`;
   const body = groups.map(g => `<section class="day-group"><h3 class="day">${dateLabel(g.at)} <small class="num">${Math.round(sum(all.filter(x => sameDay(x.at, g.at)), 'cal'))} kcal</small></h3>
     <ul class="card list">${g.meals.map(row).join('')}</ul></section>`).join('');
@@ -434,8 +588,13 @@ function historyPage() {
     <button class="btn secondary" data-act="exportCsv">${icon('download')}Export CSV</button></header>
   <div class="segmented filters" role="group" aria-label="Show meals">${f('all', 'All')}${f('street', 'Street food')}${f('home', 'Home cooked')}</div>
   <details class="card add-meal"><summary>${icon('plus')}Log a meal by hand</summary>
-    <div class="form-row"><label class="field">Meal name<input id="m-name" placeholder="Egg roll"></label>
-    <label class="field">Calories<input id="m-cal" type="number" min="0" max="3000" placeholder="350"></label></div>
+    <div class="form-row"><label class="field">Meal name<input id="m-name" maxlength="120" placeholder="Egg roll"></label>
+    <label class="field">Calories<input id="m-cal" type="number" inputmode="numeric" min="0" max="3000" placeholder="350"></label></div>
+    <fieldset class="form-row macros"><legend class="field-label">Protein, carbs and fat <small>(optional, in grams)</small></legend>
+    <label class="field">Protein<input id="m-protein" type="number" inputmode="decimal" min="0" max="300" placeholder="12"></label>
+    <label class="field">Carbs<input id="m-carbs" type="number" inputmode="decimal" min="0" max="500" placeholder="40"></label>
+    <label class="field">Fat<input id="m-fat" type="number" inputmode="decimal" min="0" max="300" placeholder="15"></label>
+    <small class="macros-hint">Left blank, this meal adds nothing to today's protein, carbs and fat.</small></fieldset>
     <label class="check"><input type="checkbox" id="m-street"> Street food</label>
     <div class="actions"><button class="btn" data-act="addManual">Add meal</button></div></details>
   ${body || `<div class="empty-state">${icon('history')}<h3>No meals here yet</h3><p>Scan one, or log one by hand.</p><button class="btn accent" data-page="scan">${icon('camera')}Scan a meal</button></div>`}`;
@@ -490,25 +649,33 @@ function rewardsPage() {
   const streak = streakDays(), best = bestStreak(), pts = points(), lv = level(pts), ctx = badgeCtx();
   const next = BADGES.filter(b => b.id[0] === 's').find(b => b.goal > streak);
   const can = claimable();
-  const badgeRows = BADGES.map(b => {
+  const badgeRow = b => {
     const got = state.badges[b.id];
     const prog = Math.min(b.of(ctx), b.goal);
     return `<li class="badge ${got ? '' : 'locked'}"><span class="badge-icon">${icon(b.icon)}</span>
       <div><b>${b.name}</b><small>${got ? 'Unlocked ' + dateLabel(got) : b.desc}</small>
       ${got ? '' : `<div class="progress thin" role="progressbar" aria-label="${b.name} progress" aria-valuemin="0" aria-valuemax="${b.goal}" aria-valuenow="${prog}"><i style="width:${prog / b.goal * 100}%"></i></div><small class="num">${prog} of ${b.goal}</small>`}</div></li>`;
-  }).join('');
+  };
+  // Earned badges, then only the next one or two to aim for; the rest wait behind "More badges".
+  const earned = BADGES.filter(b => state.badges[b.id]);
+  const locked = BADGES.filter(b => !state.badges[b.id]);
+  const upNext = [locked.find(b => b.id[0] !== 's'), locked.find(b => b.id[0] === 's')].filter(Boolean);
+  const later = locked.filter(b => !upNext.includes(b));
+  const badgeRows = [...earned, ...upNext].map(badgeRow).join('');
+  const moreBadges = later.length ? `<details class="how more-badges"><summary>More badges (${later.length})</summary><ul class="badge-grid">${later.map(badgeRow).join('')}</ul></details>` : '';
   return `<header class="page-head"><div><h2>Rewards</h2><p class="sub">Go a full week without street food to unlock the weekly reward.</p></div></header>
   <div class="rewards-top">
   <section class="card streak-card"><h3>Street-free streak</h3><p class="big num">${streak} <span>day${streak === 1 ? '' : 's'}</span></p>
     ${dots(streak)}
-    <p class="sub">${next ? (next.goal - streak) + ' more days for "' + next.name + '". ' : 'Every streak badge unlocked. '}Best run so far: ${best} day${best === 1 ? '' : 's'}.</p></section>
+    <p class="sub">${streak === 0 ? 'A new run starts today. ' : ''}${next ? (next.goal - streak) + ' more days for “' + next.name.replace(/-/g, '\u2011') + '”. ' : 'Every streak badge unlocked. '}${best ? `Best run so far: ${best} day${best === 1 ? '' : 's'}.` : ''}</p></section>
   <section class="card reward ${can ? 'ready' : ''}"><h3>Weekly reward</h3>
     <p>${can ? 'You made it through a full street-free week. Claim 50 bonus points.' : streak >= 7 ? 'Claimed for this week. The next one unlocks after 7 more street-free days.' : 'Unlocks after 7 days in a row without street food.'}</p>
-    <button class="btn ${can ? 'accent' : 'secondary'}" data-act="claim" ${can ? '' : 'disabled'}>${can ? 'Claim 50 points' : 'Not ready yet'}</button></section>
+    ${can ? '<button class="btn accent" data-act="claim">Claim 50 points</button>'
+    : `<div class="progress thin" role="progressbar" aria-label="Weekly reward progress" aria-valuemin="0" aria-valuemax="7" aria-valuenow="${streak % 7}"><i style="width:${streak % 7 / 7 * 100}%"></i></div><small class="num">${streak % 7} of 7 street-free days</small>`}</section>
   <section class="card level-card"><h3>Level ${lv.n}: ${lv.name}</h3><div class="progress" role="progressbar" aria-label="Level progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${lv.into}"><i style="width:${lv.into}%"></i></div>
     <p class="sub">${pts} points. ${100 - lv.into} more for the next level. You earn 10 for every street-free day, 5 for every home-cooked meal and 50 for each weekly reward.</p></section>
   </div>
-  <section class="section"><h3 class="section-title">Badges</h3><ul class="badge-grid">${badgeRows}</ul></section>`;
+  <section class="section"><h3 class="section-title">Badges</h3><ul class="badge-grid">${badgeRows}</ul>${moreBadges}</section>`;
 }
 
 function profilePage() {
@@ -530,9 +697,11 @@ function profilePage() {
   <h3 class="form-section">Goals and kitchen</h3>
   <div class="form-grid">
   <label class="field">Diet<select id="p-diet">${Object.keys(DIET_RANK).map(d => `<option ${d === p.diet ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
-  <label class="field">Weight goal<select id="p-goalDir">${opts('goalDir', { lose: 'Lose weight', maintain: 'Stay the same', gain: 'Gain weight or muscle' })}</select></label>
+  <label class="field">Weight goal<select id="p-goalDir">${opts('goalDir', { lose: 'Lose weight', maintain: 'Maintain weight', gain: 'Gain weight or muscle' })}</select></label>
   <label class="field">Kitchen in your room<select id="p-kitchen">${opts('kitchen', KITCHENS)}</select></label>
-  <label class="field">Daily calorie goal<input id="p-goal" type="number" min="1200" max="4000" step="50" value="${esc(p.goal)}"></label></div>
+  <label class="field">Daily calorie goal<input id="p-goal" type="number" min="1200" max="4000" step="50" value="${esc(p.goal)}"></label>
+  <label class="field wide-field">Allergies<input id="p-allergies" type="text" maxlength="400" value="${esc((p.allergies || []).join(', '))}" placeholder="e.g. peanuts, lactose" aria-describedby="allergy-hint">
+    <small id="allergy-hint">Separate with commas. Scans, tips, meal ideas and the chat leave these out.</small></label></div>
   <div class="actions"><button class="btn" data-act="saveProfile">Save profile</button><button class="btn secondary" data-act="suggestGoal">Suggest a calorie goal</button></div></section>
   <div class="two-up">
   <section class="card"><h3>Account</h3>${who}</section>
@@ -540,11 +709,11 @@ function profilePage() {
   </div>`;
 }
 
-const pages = { dashboard, scan: scanPage, history: historyPage, cook: cookPage, rewards: rewardsPage, profile: profilePage };
+const pages = { dashboard, scan: scanPage, ask: askPage, history: historyPage, cook: cookPage, rewards: rewardsPage, profile: profilePage };
 
 function show(name, opts = {}) {
   if (!pages[name]) name = 'dashboard';
-  document.querySelectorAll('#nav button').forEach(b => {
+  document.querySelectorAll('.side [data-page]').forEach(b => {
     b.classList.toggle('on', b.dataset.page === name);
     if (b.dataset.page === name) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
@@ -566,7 +735,7 @@ function refreshStatus() {
   if (!chip) return;
   const map = { idle: ['Connecting to the server…', ''], ok: ['Connected to NutriScan AI', 'ok'], ai: ['Connected · AI unavailable: ' + net.detail, 'bad'], offline: ['Server not reachable: is uvicorn running?', 'bad'], http: ['Server error: ' + net.detail, 'bad'] };
   const [text, cls] = map[net.state];
-  chip.textContent = text; chip.className = 'status ' + cls;
+  chip.innerHTML = `<span class="status-text">${esc(text)}</span>`; chip.title = text; chip.className = 'status ' + cls;
 }
 
 // ---------- Meals: create, log, sync ----------
@@ -578,7 +747,7 @@ function logMeal(m) {
   save();
   checkBadges();
   if (canSync() && !recentlyOffline()) {
-    pushMeal(m).then(id => { m.synced = true; if (id) m.remoteId = String(id); save(); refreshStatus(); }).catch(e => { refreshStatus(); if (!e.offline) toast('Saved on this device. The server said: ' + reasonFor(e)); });
+    pushMeal(m).then(id => { m.synced = true; if (id) m.remoteId = String(id); save(); refreshStatus(); refreshServerNumbers(); }).catch(e => { refreshStatus(); if (!e.offline) toast('Saved on this device. The server said: ' + reasonFor(e)); });
   }
 }
 
@@ -588,7 +757,15 @@ async function syncNow(manual) {
   if (!canSync()) { if (manual) toast('Sign in to sync your meals'); return; }
   try {
     for (const m of state.meals.filter(x => !x.synced && !x.sample)) { const id = await pushMeal(m); m.synced = true; if (id) m.remoteId = String(id); }
-    const remote = await fetchRemoteMeals();
+    // Independent reads go out together: one round of latency instead of four in a row.
+    const [fetched, saved] = await Promise.all([
+      fetchRemoteMeals(),
+      state.profileTouched ? null : fetchRemoteProfile().catch(() => null), // optional: meals still sync
+      refreshServerNumbers(),
+    ]);
+    // A meal in its Undo window is still on the server; don't bring it back.
+    const waiting = pendingRemoval && (pendingRemoval.remoteId || pendingRemoval.id);
+    const remote = fetched.filter(r => r.id !== waiting);
     const local = new Map(state.meals.filter(m => m.synced && !m.sample).map(m => [m.remoteId || m.id, m]));
     const before = state.meals.filter(m => !m.sample).length;
     const fresh = remote.filter(r => !local.has(r.id)).length;
@@ -601,18 +778,15 @@ async function syncNow(manual) {
     // Bring the saved profile (and the calorie target the server computes) onto this device,
     // but never over changes made here.
     let profileChanged = false;
-    if (!state.profileTouched) {
-      try {
-        const saved = await fetchRemoteProfile();
-        if (!state.profile.name && auth.user?.name) saved.name = auth.user.name.slice(0, 40);
-        if (saved && Object.keys(saved).some(k => state.profile[k] !== saved[k])) {
-          state.profile = { ...state.profile, ...saved };
-          profileChanged = true;
-        }
-      } catch { /* the profile is optional: meals have already synced */ }
+    if (saved?.diet) state.setupDone = true;
+    if (saved && !state.profileTouched) {
+      if (!state.profile.name && auth.user?.name) saved.name = auth.user.name.slice(0, 40);
+      if (Object.keys(saved).some(k => JSON.stringify(state.profile[k]) !== JSON.stringify(saved[k]))) {
+        state.profile = { ...state.profile, ...saved };
+        profileChanged = true;
+      }
     }
 
-    await refreshServerNumbers();
     checkBadges(true);
     save(); refreshStatus();
     if (manual) {
@@ -628,19 +802,22 @@ async function syncNow(manual) {
   }
 }
 
+// The dashboard renders twice on load (local data, then after the sync); both share one AI request.
+let insightRequest = null;
+
 async function loadInsight() {
   const box = $('#ai-insight');
   if (!box) return;
   try {
-    const d = await fetchInsight();
+    const d = await (insightRequest ||= fetchInsight().finally(() => { insightRequest = null; }));
     const el = $('#ai-insight');
     if (!el) return;
     const tone = { on_track: 'good', over: 'warn', under: 'info', no_data: 'info' }[d.health_status] || 'info';
-    el.innerHTML = `<h3>Today's AI insight</h3><p class="insight-head ${tone}">${esc(d.headline)}</p><p class="insight-body">${esc(d.summary)}</p>
+    el.innerHTML = `<p class="insight-head ${tone}">${esc(d.headline)}</p><p class="insight-body">${esc(d.summary)}</p>
       <ul class="tips">${d.tips.map(t => `<li>${icon('check')}<span>${esc(t)}</span></li>`).join('')}</ul><p class="sub small">${esc(d.disclaimer)}</p>`;
   } catch (e) {
     const el = $('#ai-insight');
-    if (el) el.innerHTML = `<h3>Today's AI insight</h3><div class="empty-inline">${icon('info')}<p>Not available right now. ${esc(reasonFor(e))}</p></div>`;
+    if (el) el.innerHTML = `<div class="empty-inline">${icon('info')}<p>The AI's read on your day isn't available right now. ${esc(reasonFor(e))}</p></div>`;
   }
   refreshStatus();
 }
@@ -658,29 +835,34 @@ function setFile(f) {
   const d = $('.drop'); if (d) d.classList.add('has-img');
   const n = $('#fname'); if (n) n.textContent = f.name;
   const r = $('#result'); if (r) r.innerHTML = resultSlot();
+  refreshAnalyze();
 }
 
 async function askAbout(text) {
+  const general = currentPage() === 'ask', thread = general ? askThread : scan;
   const box = $('#q');
-  if (!text || !scan.result) return;
+  if (!text || (!general && !scan.result) || thread.busy) return;
   if (box) box.value = '';
-  scan.chat.push({ me: true, text });
-  scan.chat.push({ text: 'Thinking…', pending: true });
-  $('#msgs').innerHTML = chatHtml();
-  const a = await askBot(text, scan.result);
-  scan.chat = scan.chat.filter(m => !m.pending);
-  scan.chat.push({ text: a.text, error: a.error, markdown: a.markdown, tools: a.tools });
-  if ((a.tools || []).some(t => t.name === 'log_meal')) { scan.added = true; syncNow(false); toast('Logged to your meals'); }
+  thread.busy = true;
+  thread.chat.push({ me: true, text });
+  thread.chat.push({ text: 'Thinking…', pending: true });
+  const paint = () => { const msgs = $('#msgs'); if (msgs) { msgs.innerHTML = chatHtml(thread.chat); msgs.scrollTop = msgs.scrollHeight; } };
+  paint();
+  const a = await askBot(text, general ? {} : scan.result);
+  thread.busy = false;
+  thread.chat = thread.chat.filter(m => !m.pending);
+  thread.chat.push({ text: a.text, error: a.error, markdown: a.markdown, tools: a.tools });
+  if ((a.tools || []).some(t => t.name === 'log_meal')) { if (!general) scan.added = true; syncNow(false); toast('Logged to your meals'); }
   refreshStatus();
-  const msgs = $('#msgs'); if (msgs) { msgs.innerHTML = chatHtml(); msgs.scrollTop = msgs.scrollHeight; }
+  paint();
 }
 
 const actions = {
-  async analyze(btn) {
+  async analyze() {
     if (!scan.file) return toast('Choose a photo first');
     if (scan.busy) return;
     scan.busy = true; scan.since = Date.now();
-    busyButton(btn, true, 'Analyzing…');
+    refreshAnalyze();
     const loading = $('#result');
     loading.innerHTML = loadingHtml('scan', scan.since);
     loading.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -691,7 +873,7 @@ const actions = {
       try {
         scan.result = await analyzeImage(scan.file, mode, $('#meal-type') ? $('#meal-type').value : 'auto');
         state.stats[mode === 'label' ? 'labelScans' : 'mealScans']++;
-        save();
+        checkBadges(); // the first scan (and the first label) unlock a badge right here
       } catch (e) {
         scan.result = { error: e.code === 'NOT_FOOD'
           ? "We couldn't spot any food in that photo. Try a clearer, closer photo of the plate or packet."
@@ -699,17 +881,35 @@ const actions = {
       }
       refreshStatus();
     } finally { scan.busy = false; }
-    const box = $('#result'), b = $('#analyze');
-    if (b) { busyButton(b, false); b.innerHTML = 'Analyze'; }
-    if (box) box.innerHTML = resultHtml();
+    const box = $('#result');
+    refreshAnalyze(); // first: on phones this collapses the options, which moves the result up
+    if (box) {
+      box.innerHTML = resultHtml();
+      box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      $('#result h3')?.focus({ preventScroll: true });  // errors are a role="alert" banner and speak for themselves
+    }
+    const said = $('#scan-said'), f = scan.result;
+    if (said && !f.error) said.textContent = `Result ready: ${f.name}, about ${Math.round(f.cal)} kcal${f.health ? `, health score ${f.health.score} out of 100` : ''}.`;
   },
-  toggleStreet(box) { scan.result.street = box.checked; const tag = $('#result .tag'); if (tag) { tag.textContent = box.checked ? 'Street food' : 'Not street food'; tag.classList.toggle('bad', box.checked); } },
-  addMeal(btn) {
+  // Clears the result and opens the photo picker straight away.
+  scanAnother() {
+    if (scan.url) URL.revokeObjectURL(scan.url);
+    scan = { ...scan, file: null, url: '', result: null, chat: [], added: false };
+    show('scan');
+    const input = $('#file'); if (input) input.click();
+  },
+  toggleStreet(box) { scan.result.street = box.checked; const tag = $('#result .tag'); if (tag) tag.hidden = !box.checked; },
+  addMeal() {
     if (scan.added) return;
+    const before = Math.round(sum(todayMeals(), 'cal'));
     scan.added = true;
     logMeal(newMeal(scan.result, { source: scan.mode, scanId: scan.result.scanId, mealType: scan.result.mealType }));
-    btn.disabled = true; btn.innerHTML = icon('check') + 'Added to your log';
-    toast('Added to your log');
+    const row = $('#result-act');
+    if (row) {
+      row.innerHTML = resultActHtml(before);
+      // Next frame: let the new part of the bar fill in from where the day was.
+      requestAnimationFrame(() => requestAnimationFrame(() => row.querySelector('.day-bar .now')?.classList.add('in')));
+    }
   },
   swapFor() { cook.focus = scan.result.name; show('cook', { focus: true, push: true }); },
   ask(btn) { return askAbout(btn.dataset.q); },
@@ -743,16 +943,40 @@ const actions = {
     const name = $('#m-name').value.trim(), cal = Math.round(+$('#m-cal').value);
     if (!name) return toast('Enter a meal name');
     if (!(cal >= 0 && cal <= 3000) || $('#m-cal').value === '') return toast('Enter calories between 0 and 3000');
-    logMeal(newMeal({ name, cal, protein: 0, carbs: 0, fat: 0, street: $('#m-street').checked || isStreetFood(name) }, { source: 'manual' }));
+    const macro = id => { const v = $('#m-' + id).value; return v === '' ? 0 : +v; };
+    const protein = macro('protein'), carbs = macro('carbs'), fat = macro('fat');
+    if ([protein, carbs, fat].some(v => !(v >= 0 && v <= 500))) return toast('Protein, carbs and fat should be between 0 and 500 g');
+    logMeal(newMeal({ name, cal, protein, carbs, fat, street: $('#m-street').checked || isStreetFood(name) }, { source: 'manual' }));
     toast('Meal added');
     show('history');
   },
+  relog(btn) {
+    const m = state.meals.find(x => x.id === btn.dataset.id);
+    if (!m) return;
+    logMeal(newMeal(m, { source: 'manual', mealType: mealTypeAt(Date.now()), home: !!m.home }));
+    toast(`Logged ${m.name} again`);
+    show(currentPage());
+  },
+  // Gone from the list at once, but only deleted on the server once the Undo window closes.
   remove(btn) {
     const m = state.meals.find(x => x.id === btn.dataset.id);
-    state.meals = state.meals.filter(x => x.id !== btn.dataset.id);
-    save();
-    if (m && m.synced && !m.sample && canSync()) deleteMeal(m.remoteId || m.id).catch(() => {});
-    show('history');
+    if (!m) return;
+    flushRemoval();
+    // Where keyboard focus lands once the Undo toast closes: the row that took this one's place.
+    const at = [...document.querySelectorAll('[data-act="remove"]')].indexOf(btn);
+    state.meals = state.meals.filter(x => x !== m);
+    save(); show('history');
+    toast(`Removed ${m.name}`, {
+      label: 'Undo',
+      run: () => {
+        pendingRemoval = null; state.meals.push(m); save(); show(currentPage());
+        document.querySelector(`[data-act="remove"][data-id="${CSS.escape(m.id)}"]`)?.focus();
+        toast('Meal restored');
+      },
+      expire: flushRemoval,
+      refocus: () => { const rows = document.querySelectorAll('[data-act="remove"]'); return rows[at] || rows[at - 1] || $('#main h2'); },
+    });
+    pendingRemoval = m;  // after the toast: replacing the previous toast finishes the previous removal
   },
   exportCsv() {
     const head = ['date', 'time', 'meal', 'calories', 'protein_g', 'carbs_g', 'fat_g', 'fibre_g', 'sodium_mg', 'sugar_g', 'street_food', 'home_cooked'];
@@ -761,7 +985,7 @@ const actions = {
       return [d.toLocaleDateString('en-CA'), d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }), m.name, m.cal, m.protein, m.carbs, m.fat, m.fibre ?? '', m.sodium ?? '', m.sugar ?? '', m.street ? 'yes' : 'no', m.home ? 'yes' : 'no'].map(csvCell).join(',');
     });
     const url = URL.createObjectURL(new Blob([[head.join(','), ...rows].join('\n')], { type: 'text/csv' }));
-    const a = Object.assign(document.createElement('a'), { href: url, download: 'scanmyfood-history.csv' });
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'nutriscan-history.csv' });
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
@@ -798,6 +1022,10 @@ const actions = {
       p[k] = n;
     }
     ['name', 'sex', 'activity', 'goalDir', 'diet', 'kitchen'].forEach(k => { p[k] = val(k).trim(); });
+    const allergies = [...new Set(val('allergies').split(',').map(a => a.trim().toLowerCase()).filter(Boolean))];
+    if (allergies.length > 20) return toast('List up to 20 allergies');
+    if (allergies.some(a => a.length > 60)) return toast('Keep each allergy under 60 characters');
+    p.allergies = allergies;
     state.profile = { ...state.profile, ...p };
     state.profileTouched = true;
     save();
@@ -806,6 +1034,25 @@ const actions = {
       catch (e) { toast('Profile saved on this device. ' + reasonFor(e)); refreshStatus(); }
     } else toast('Profile saved on this device');
     if (currentPage() === 'profile') show('profile');  // don't pull the person back if they moved on meanwhile
+  },
+  async saveSetup(btn) {
+    const picked = Object.fromEntries(Object.keys(SETUP_CHOICES).map(k => [k, document.querySelector(`input[name="setup-${k}"]:checked`)?.value]));
+    Object.assign(state.profile, picked);
+    state.setupDone = true;
+    save();
+    const said = `Saved. Suggestions now fit your ${picked.diet.toLowerCase()} diet.`;
+    if (canSync() && CFG.endpoints.profile) {
+      busyButton(btn, true, 'Saving…');
+      try { await pushProfileChoices(state.profile); await refreshServerNumbers(); toast(said); }
+      catch (e) { state.profileTouched = true; save(); toast('Saved on this device. ' + reasonFor(e)); }  // keep these over the server's copy
+      refreshStatus();
+    } else toast(said);
+    if (currentPage() === 'dashboard') show('dashboard', { focus: true });
+  },
+  skipSetup() {
+    state.setupDone = true; save();
+    toast('Using the defaults. Change them any time in Health profile.');
+    show('dashboard', { focus: true });
   },
   syncNow() { return syncNow(true); },
   signOut() { return signOut(); },
@@ -864,17 +1111,22 @@ function watchServer() {
   }, 10000);
 }
 
+// Nothing here waits on the network before the first render: every server round trip goes to the database
+// (hundreds of ms each, seconds on a far-away region), and waiting for them in a row used to leave the page
+// blank. The page renders from this device's data first; syncNow then fills in the server's numbers.
 (async function boot() {
   refreshStatus(); // "Connecting to the server…"
-  await pingServer();
-  refreshStatus();
+  pingServer().then(refreshStatus); // only for the sidebar status
   watchServer();
-  await startAuth();
-  refreshStatus(); // show who is signed in straight away, before the slower sync below
-  loadState();
-  await refreshServerNumbers();
-  checkBadges(true);
-  refreshStatus();
+  try {
+    await startAuth();
+    refreshStatus(); // show who is signed in straight away
+    loadState();
+    checkBadges(true);
+  } catch (err) {
+    console.error(err);
+    if (!state) state = emptyState();
+  }
   show(pages[currentPage()] ? currentPage() : 'dashboard');
   syncNow(false);
 })();
