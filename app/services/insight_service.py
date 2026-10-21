@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import DISCLAIMER
+from app.core.errors import AppError
 from app.db.models import InsightCache, User
 from app.services import intake_service
 from app.services.llm.gemini_client import LLMClient
@@ -36,6 +37,14 @@ def _normalise_tips(tips: list[str]) -> list[str]:
 
 
 async def daily_insight(db: AsyncSession, user: User, day: date | None, llm: LLMClient) -> dict[str, Any]:
+    """Gemini's insight for a local day (default today). Future days → VALIDATION_ERROR, without an AI call."""
+    if day is not None and day > intake_service.today_for(user):
+        raise AppError(
+            "VALIDATION_ERROR",
+            "Insights are only available for today or earlier.",
+            422,
+            [{"loc": ["query", "date"], "msg": "must not be in the future", "type": "value_error"}],
+        )
     data = await intake_service.daily(db, user, day)
     day = data["date"]
     status = data["health_status"]
