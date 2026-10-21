@@ -22,6 +22,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings
 from app.core.errors import AppError, ai_unavailable
+from app.core.metrics import metrics
 from app.services.llm import prompts
 
 # Re-exported so scripts/smoke_gemini.py and tests can keep importing them from this module.
@@ -107,17 +108,38 @@ def _response_text(resp: Any) -> str:
 
 def _log_usage(resp: Any, *, op: str, model: str, started: float) -> None:
     usage = getattr(resp, "usage_metadata", None)
+    elapsed = time.perf_counter() - started
+    prompt_tokens = getattr(usage, "prompt_token_count", None)
+    output_tokens = getattr(usage, "candidates_token_count", None)
     logger.info(
         "gemini call",
         extra={
             "op": op,
             "model": model,
-            "latency_ms": round((time.perf_counter() - started) * 1000),
-            "prompt_tokens": getattr(usage, "prompt_token_count", None),
-            "output_tokens": getattr(usage, "candidates_token_count", None),
+            "latency_ms": round(elapsed * 1000),
+            "prompt_tokens": prompt_tokens,
+            "output_tokens": output_tokens,
             "total_tokens": getattr(usage, "total_token_count", None),
         },
     )
+    _record_success(op, model, elapsed, prompt_tokens, output_tokens)
+
+
+def _record_success(op: str, model: str, elapsed: float, prompt_tokens: Any, output_tokens: Any) -> None:
+    metrics.inc("gemini_requests_total", op=op, model=model, outcome="ok")
+    metrics.observe("gemini_request_duration_seconds", elapsed, op=op, model=model)
+    if isinstance(prompt_tokens, int):
+        metrics.inc("gemini_tokens_total", prompt_tokens, model=model, kind="prompt")
+    if isinstance(output_tokens, int):
+        metrics.inc("gemini_tokens_total", output_tokens, model=model, kind="output")
+
+
+def _give_up(op: str, exc: BaseException | None) -> AppError:
+    """The user-facing AI_UNAVAILABLE error for the last failure, counted by reason for the alert rules."""
+    error = _unavailable(exc)
+    reason = (error.details or {}).get("reason", "unavailable")
+    metrics.inc("gemini_unavailable_total", op=op, reason=reason)
+    return error
 
 
 def make_sdk_client(api_key: str, use_vertex: bool, timeout_s: float) -> genai.Client:
@@ -239,6 +261,7 @@ class GeminiClient:
                 last_exc = exc
                 kind = _classify(exc)
                 self._note_failure(model, exc)
+                metrics.inc("gemini_requests_total", op=op_name, model=model, outcome="error")
                 logger.warning(
                     "gemini attempt failed",
                     extra={"op": op_name, "model": model, "error": _describe(exc), "kind": kind},
@@ -251,7 +274,7 @@ class GeminiClient:
                     continue
                 i += 1
         logger.error("gemini unavailable", extra={"op": op_name, "error": _describe(last_exc) if last_exc else None})
-        raise _unavailable(last_exc)
+        raise _give_up(op_name, last_exc)
 
     async def _structured(self, op_name: str, schema: type[M], system: str, contents: list[Any]) -> M:
         self._sdk()  # fail fast (not_configured) before any attempt
@@ -454,10 +477,9 @@ class GeminiClient:
                         yielded = True
                         yield StreamChunk(text=delta)
                 self._note_success(model)
-                logger.info(
-                    "gemini stream",
-                    extra={"model": model, "latency_ms": round((time.perf_counter() - started) * 1000)},
-                )
+                elapsed = time.perf_counter() - started
+                logger.info("gemini stream", extra={"model": model, "latency_ms": round(elapsed * 1000)})
+                _record_success("chat_stream", model, elapsed, None, None)
                 yield StreamChunk(
                     final=ChatTurn(
                         text="".join(text_buf) or None,
@@ -474,14 +496,15 @@ class GeminiClient:
                 last_exc = exc
                 kind = _classify(exc)
                 self._note_failure(model, exc)
+                metrics.inc("gemini_requests_total", op="chat_stream", model=model, outcome="error")
                 logger.warning("gemini stream failed", extra={"model": model, "error": _describe(exc), "kind": kind})
                 if yielded or kind == "fatal":
-                    raise _unavailable(exc) from exc
+                    raise _give_up("chat_stream", exc) from exc
                 if kind == "fallback" and model == plan[0][0]:
                     i = next((j for j, (m, _) in enumerate(plan) if m != model), len(plan))
                     continue
                 i += 1
-        raise _unavailable(last_exc)
+        raise _give_up("chat_stream", last_exc)
 
 
 # ---------------------------------------------------------------------- diagnostics (smoke script)
