@@ -14,7 +14,7 @@
     "assistant_message": {
       "id": "9df1b2aa-fd5b-48a1-9d95-f565bb3f30b1",
       "role": "assistant",
-      "content": "So far today you've had about **1166 kcal** of your 1770 kcal target, with 46 g protein.\n- Add curd, dal or eggs for protein\n- Keep dinner light and balanced",
+      "content": "So far today you've had about **1166 kcal** of your 1770 kcal target, with 46 g protein.\n- Add curd, dal or paneer for protein\n- Keep dinner light and balanced",
       "image_url": null,
       "tool_calls": [
         {
