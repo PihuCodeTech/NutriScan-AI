@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "frontend/index.html"
+        ],
+        "createdAt": "2026-10-20T11:06:15.024Z",
+        "reason": "Claude: main has 36-40px padding (16-20px on phones) in style.css; .side-foot has 14px top padding under its border"
+      },
+      {
+        "rule": "cream-palette",
+        "value": "*",
+        "files": [
+          "frontend/index.html"
+        ],
+        "createdAt": "2026-10-20T11:06:15.052Z",
+        "reason": "user confirmed: chose the 'Refine green' direction whose preview specified warm paper #f6f5ef"
+      }
+    ]
+  }
+}
