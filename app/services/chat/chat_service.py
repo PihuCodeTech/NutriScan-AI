@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import AppError, not_found
+from app.core.metrics import metrics
 from app.db.base import utcnow
 from app.db.models import ChatMessage, ChatSession, User
 from app.db.session import get_sessionmaker
@@ -353,14 +354,18 @@ async def stream_reply(
                 await _run_tools(turn, history, ctx, state)
                 rounds += 1
             msg = await _save_assistant(db, session, state, llm)
+            metrics.inc("events_total", event="MESSAGE_STREAMED")
             yield sse("done", ChatMessageOut.model_validate(message_out(msg, storage)).model_dump(mode="json"))
         except AppError as exc:
             await db.rollback()
+            # Streams answer 200 and report errors in-band, so count them here like the error envelope does.
+            metrics.inc("app_errors_total", code=exc.code)
             error = {"code": exc.code, "message": exc.message}
             if exc.details:
                 error["details"] = exc.details  # e.g. {"reason": "auth"} for a rejected Gemini key
             yield sse("error", error)
         except Exception:
+            metrics.inc("unhandled_exceptions_total", where="chat_stream")
             logger.exception("chat stream failed")
             await db.rollback()
             yield sse("error", {"code": "INTERNAL_ERROR", "message": "Something went wrong on our side."})
