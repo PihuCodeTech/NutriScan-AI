@@ -1,4 +1,4 @@
-// ScanMyFood web: sample data, built-in recipes, badges, and the helpers that work without a server.
+// NutriScan AI web: sample data, built-in recipes, badges, and the helpers that work without a server.
 // Load order in index.html: config.js, data.js, api.js, auth.js, app.js
 
 // ---------- Street-food detector ----------
@@ -65,6 +65,7 @@ const LEVELS = ['Newcomer', 'Mess regular', 'Home cook', 'Streak keeper', 'Kitch
 
 // Every badge stays unlocked once earned. Streak badges must have ids that start with "s" (the rewards page relies on it).
 const BADGES = [
+  { id: 'f1', name: 'First scan', icon: 'camera', desc: 'Scan your first meal or label', goal: 1, of: c => c.scans, test: c => c.scans >= 1 },
   { id: 's3', name: '3-day streak', icon: 'sprout', desc: 'Go 3 days without street food', goal: 3, of: c => c.streak, test: c => c.streak >= 3 },
   { id: 's7', name: '7-day streak', icon: 'flame', desc: 'Go a full week without street food', goal: 7, of: c => c.streak, test: c => c.streak >= 7 },
   { id: 's14', name: '14-day streak', icon: 'trophy', desc: 'Go two weeks without street food', goal: 14, of: c => c.streak, test: c => c.streak >= 14 },
