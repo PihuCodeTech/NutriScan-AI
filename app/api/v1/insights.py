@@ -20,9 +20,8 @@ router = APIRouter(prefix="/insights", tags=["insights"])
     "/daily",
     response_model=Envelope[DailyInsightOut],
     summary="Daily insight",
-    description="Encouraging headline, 2-sentence summary and 3 tips written by Gemini over the day's "
-    "server-computed numbers. Cached per (user, date, totals); `no_data` days get a static nudge without "
-    "an AI call.",
+    description="Encouraging headline, 2-sentence summary and up to 3 tips written by Gemini over the day's "
+    "server-computed numbers (including `no_data` days). Cached per (user, date, totals). Future dates → 422.",
     responses=errors(*AUTH, "VALIDATION_ERROR", *AI),
 )
 @limiter.limit(ai_limit)
