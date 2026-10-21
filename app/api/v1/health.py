@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Request
@@ -14,6 +15,8 @@ from app.schemas.meta import HealthOut
 router = APIRouter(tags=["system"])
 logger = logging.getLogger(__name__)
 
+DB_CHECK_TIMEOUT_S = 5.0
+
 
 @router.get(
     "/health",
@@ -24,7 +27,8 @@ logger = logging.getLogger(__name__)
 )
 async def health(request: Request, db: DB, settings: SettingsDep) -> dict:
     try:
-        await db.execute(text("SELECT 1"))
+        # Bounded, so a down or paused database reports "error" quickly instead of hanging the check.
+        await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=DB_CHECK_TIMEOUT_S)
         db_status = "ok"
     except Exception as exc:
         logger.warning("db health check failed", extra={"error": type(exc).__name__})
