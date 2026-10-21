@@ -16,6 +16,7 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
 # Clients that don't set a type (curl -F without ;type=, some mobile libs): let Pillow decide.
 LENIENT_CONTENT_TYPES = {"", "application/octet-stream"}
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "MPO"}
+OPEN_FORMATS = ("JPEG", "PNG", "WEBP")  # decoders tried on uploads; MPO is opened by the JPEG plugin
 MAX_SIDE_PX = 1024
 JPEG_QUALITY = 85
 MAX_PIXELS = 50_000_000
@@ -39,12 +40,17 @@ def _invalid(message: str = "The file is not a valid JPEG, PNG or WebP image.") 
 def normalize_image_bytes(raw: bytes) -> NormalizedImage:
     """Open with Pillow (rejecting non-images), orient, convert to RGB, resize and re-encode. CPU-bound."""
     try:
-        with Image.open(io.BytesIO(raw)) as probe:
+        # `formats=` keeps every other Pillow decoder (TIFF, EPS, GIF, PPM, ...) away from untrusted bytes.
+        with Image.open(io.BytesIO(raw), formats=OPEN_FORMATS) as probe:
             fmt = probe.format
+            width, height = probe.size
             probe.verify()
         if fmt not in ALLOWED_FORMATS:
             raise _invalid()
-        with Image.open(io.BytesIO(raw)) as img:
+        # Pillow only raises a DecompressionBombError above 2 × MAX_IMAGE_PIXELS; refuse anything above 1 ×.
+        if width * height > MAX_PIXELS:
+            raise _invalid("The image is too large (too many pixels).")
+        with Image.open(io.BytesIO(raw), formats=OPEN_FORMATS) as img:
             img = ImageOps.exif_transpose(img)
             if img.mode in ("RGBA", "LA", "P"):
                 rgba = img.convert("RGBA")
