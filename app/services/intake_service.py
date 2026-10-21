@@ -28,6 +28,10 @@ from app.services.user_service import user_context
 from app.utils.timeutil import default_meal_type, ensure_utc, get_tz, local_date_of, now_local, utcnow
 
 TOP_FOODS_LIMIT = 5
+# eaten_at must fall in [now - 366 days, now + 1 day]. The day of slack ahead covers naive local times, which
+# are read as UTC and so can land up to +14 h ahead.
+MAX_EATEN_AT_AHEAD = timedelta(days=1)
+MAX_EATEN_AT_BACK = timedelta(days=366)
 
 
 def _tz(user: User) -> ZoneInfo:
@@ -50,8 +54,18 @@ def build_entry(
     is_street_food: bool = False,
     is_home_cooked: bool = False,
 ) -> IntakeEntry:
-    """Construct (not persist) an intake entry; totals are always computed server-side."""
-    eaten = ensure_utc(eaten_at) if eaten_at else utcnow()
+    """Construct (not persist) an intake entry; totals are always computed server-side.
+
+    Raises VALIDATION_ERROR when `eaten_at` is more than a day ahead or more than a year back."""
+    now = utcnow()
+    eaten = ensure_utc(eaten_at) if eaten_at else now
+    if not now - MAX_EATEN_AT_BACK <= eaten <= now + MAX_EATEN_AT_AHEAD:
+        raise AppError(
+            "VALIDATION_ERROR",
+            "The meal time must be within the last year and not in the future.",
+            422,
+            [{"loc": ["body", "eaten_at"], "msg": "out of range", "type": "value_error"}],
+        )
     snapshot = [
         {
             "id": i.get("id") or str(uuid.uuid4()),
