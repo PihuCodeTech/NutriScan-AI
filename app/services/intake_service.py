@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, not_found
@@ -303,47 +303,34 @@ async def summary(db: AsyncSession, user: User, days: int) -> dict[str, Any]:
     averages = round_nutrients(
         {k: sum(d["totals"][k] for d in logged) / len(logged) for k in NUTRIENT_KEYS} if logged else {}
     )
-    # A streak can extend beyond the window, so look further back for it.
-    logged_dates = set(
-        await db.scalars(
-            select(IntakeEntry.local_date)
-            .distinct()
+    # Streaks can extend beyond the window, so look further back for them. One grouped query gives both the
+    # logged days and the days with a street-food entry (each query is a network round trip on Postgres).
+    street_flag = func.max(case((IntakeEntry.is_street_food.is_(True), 1), else_=0))
+    day_rows = (
+        await db.execute(
+            select(IntakeEntry.local_date, street_flag)
             .where(IntakeEntry.user_id == user.id, IntakeEntry.local_date >= today - timedelta(days=366))
+            .group_by(IntakeEntry.local_date)
         )
-    )
-    # Days (within the window) with a street-food entry, plus all-time home-cooked / street counts.
-    street_dates = set(
-        await db.scalars(
-            select(IntakeEntry.local_date)
-            .distinct()
-            .where(
-                IntakeEntry.user_id == user.id,
-                IntakeEntry.is_street_food.is_(True),
-                IntakeEntry.local_date >= today - timedelta(days=366),
-            )
-        )
-    )
-    home_cooked_count = int(
-        await db.scalar(
-            select(func.count())
-            .select_from(IntakeEntry)
-            .where(IntakeEntry.user_id == user.id, IntakeEntry.is_home_cooked.is_(True))
-        )
-        or 0
-    )
+    ).all()
+    logged_dates = {d for d, _ in day_rows}
+    street_dates = {d for d, street in day_rows if street}
+    # All-time home-cooked count and street-food count within the window, in one pass.
     window_start = today - timedelta(days=days - 1)
-    street_food_count = int(
-        await db.scalar(
-            select(func.count())
-            .select_from(IntakeEntry)
-            .where(
-                IntakeEntry.user_id == user.id,
-                IntakeEntry.is_street_food.is_(True),
-                IntakeEntry.local_date >= window_start,
-            )
+    counts = (
+        await db.execute(
+            select(
+                func.sum(case((IntakeEntry.is_home_cooked.is_(True), 1), else_=0)),
+                func.sum(
+                    case(
+                        (and_(IntakeEntry.is_street_food.is_(True), IntakeEntry.local_date >= window_start), 1),
+                        else_=0,
+                    )
+                ),
+            ).where(IntakeEntry.user_id == user.id)
         )
-        or 0
-    )
+    ).one()
+    home_cooked_count, street_food_count = int(counts[0] or 0), int(counts[1] or 0)
     return {
         "days": out_days,
         "averages": averages,
