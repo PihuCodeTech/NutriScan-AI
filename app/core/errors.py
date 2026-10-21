@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.metrics import metrics
 from app.core.responses import fail
 
 logger = logging.getLogger("app.errors")
@@ -99,5 +100,6 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        metrics.inc("unhandled_exceptions_total", where="http")
         logger.exception("unhandled error on %s %s", request.method, request.url.path)
         return fail("INTERNAL_ERROR", "Something went wrong on our side. Please try again.", 500)
