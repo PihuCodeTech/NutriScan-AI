@@ -29,21 +29,30 @@ from app.utils.timeutil import day_bounds_utc, default_meal_type, get_tz, now_lo
 logger = logging.getLogger(__name__)
 
 MAX_TIPS = 3
+UNKNOWN_WEIGHT_G = 100.0  # reference portion when Gemini gives no weight for an item
 
 
 # ---------------------------------------------------------------------- item helpers
 
 
 def item_from_llm(item: LLMFoodItem, *, source: str = "ai") -> dict[str, Any]:
-    """Validated LLM item → FoodItem dict with sanitised nutrients and per-100 g values."""
+    """Validated LLM item → FoodItem dict with sanitised nutrients and per-100 g values.
+
+    A missing weight (≤ 0 g) is treated as a 100 g reference portion with low confidence, so the per-100 g
+    values stay consistent with the nutrients and later gram edits rescale them instead of zeroing them."""
     qty = round(max(float(item.quantity_g), 0.0), 1)
+    serving = (item.serving_description or "").strip()[:200] or None
+    confidence = item.confidence
+    if qty <= 0:
+        qty, confidence = UNKNOWN_WEIGHT_G, "low"
+        serving = f"weight not estimated (~{UNKNOWN_WEIGHT_G:g} g assumed)"
     nutrients = round_nutrients(sanitize(item.nutrients.model_dump(), context=item.canonical_name))
     return {
         "name": item.name.strip()[:120] or "Food item",
         "canonical_name": canonicalize(item.canonical_name or item.name)[:120],
         "quantity_g": qty,
-        "serving_description": (item.serving_description or "").strip()[:200] or None,
-        "confidence": item.confidence,
+        "serving_description": serving,
+        "confidence": confidence,
         "source": source,
         "nutrition_source": "estimate",  # set to "table" by ground_items when the food is in the foods table
         "nutrients": nutrients,
@@ -301,6 +310,13 @@ async def edit_items(db: AsyncSession, user: User, scan: Scan, edits: list[ItemE
         item.serving_description = f"{item.quantity_g:g} g (edited)"
         item.source = "user_edit"
 
+    if not scan.items:  # nothing is committed: the request's session is rolled back
+        raise AppError(
+            "VALIDATION_ERROR",
+            "A scan needs at least one item. Delete the scan instead of removing every item.",
+            422,
+            [{"loc": ["body", "items"], "msg": "would remove every item", "type": "value_error"}],
+        )
     _recompute(scan, user)
     scan.updated_at = datetime.now().astimezone()
     await db.commit()
@@ -334,12 +350,10 @@ async def log_scan(
     eaten_at: datetime | None,
     is_street_food: bool = False,
 ) -> IntakeEntry:
-    """Create an intake entry from the scan. Logging twice → ALREADY_LOGGED."""
+    """Create an intake entry from the scan. Logging twice (even concurrently) → ALREADY_LOGGED."""
     _ensure_completed(scan)
     if scan.logged_intake_id:
-        raise AppError(
-            "ALREADY_LOGGED", "This scan is already logged to your intake.", 409, {"intake_id": scan.logged_intake_id}
-        )
+        raise _already_logged(scan.logged_intake_id)
     entry = intake_service.build_entry(
         user,
         source="scan",
@@ -352,9 +366,22 @@ async def log_scan(
     )
     db.add(entry)
     await db.flush()
+    # Claim the scan atomically: of two concurrent requests (a double-tap), only one matches the IS NULL guard.
+    claimed = await db.execute(
+        update(Scan)
+        .where(Scan.id == scan.id, Scan.logged_intake_id.is_(None))
+        .values(logged_intake_id=entry.id)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:  # another request logged it first; the uncommitted entry is rolled back with the request
+        raise _already_logged(await db.scalar(select(Scan.logged_intake_id).where(Scan.id == scan.id)))
     scan.logged_intake_id = entry.id
     await db.commit()
     return entry
+
+
+def _already_logged(intake_id: str | None) -> AppError:
+    return AppError("ALREADY_LOGGED", "This scan is already logged to your intake.", 409, {"intake_id": intake_id})
 
 
 async def delete_scan(db: AsyncSession, user: User, scan: Scan, storage: Storage) -> None:
