@@ -7,24 +7,30 @@
 __pycache__/
 *.py[cod]
 .venv/
+*.egg-info/
+build/
+dist/
+
+# Tooling caches and reports
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .coverage
 htmlcov/
 
-# Data
+# Local data (databases, uploads, model training data and output)
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 storage/
-ml/output/
 ml/data/
+ml/output/
+
+# Logs
+*.log
 
 # OS / editors
 .DS_Store
 .idea/
 .vscode/
-
-# Local editor/runtime
-.claude/
-*.db-wal
-*.db-shm
