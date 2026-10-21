@@ -41,7 +41,9 @@ def create_access_token(user_id: str) -> str:
 def decode_access_token(token: str) -> str | None:
     """Return the user id from a valid token, or None if invalid/expired."""
     try:
-        payload = jwt.decode(token, get_settings().JWT_SECRET, algorithms=[_ALGORITHM])
+        payload = jwt.decode(
+            token, get_settings().JWT_SECRET, algorithms=[_ALGORITHM], options={"require": ["exp", "sub"]}
+        )
     except jwt.PyJWTError:
         return None
     sub = payload.get("sub")
