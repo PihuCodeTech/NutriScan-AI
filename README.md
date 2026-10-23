@@ -10,6 +10,10 @@ The project is a FastAPI backend (REST and SSE under `/api/v1`) with a small web
 
 > *Estimates only — not medical advice.*
 
+![NutriScan AI dashboard: today's calories and macros against personal targets, an AI summary of the day with tips, today's meals, a 7-day calorie chart and the street-free streak](docs/images/dashboard.png)
+
+*The dashboard for the demo account (`python scripts/seed_demo.py`), running in mock mode.*
+
 ## Features
 
 - Scan a meal photo to get items, portions, nutrients, plate totals, a health score, flags and tips. Items
