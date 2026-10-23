@@ -9,7 +9,10 @@ MONITOR_INTERVAL_S (default 60 s):
   gemini_config        any AI request refused for auth / quota / model / not_configured in 5 min: fix the key,
                        billing or model name; retrying won't help.
   gemini_unavailable   >= 5 AI requests gave up after retries + fallback and >= 50 % of AI calls failed in 5 min.
+  slow_requests        >= 10 requests that made no Gemini call took > 3 s, and >= 10 % of requests, in 5 min.
   job_failed:<name>    the last run of a background job failed (resolves when a later run succeeds).
+  job_overdue:<name>   a scheduled job has not succeeded for 2 intervals and its last run didn't fail: it hangs.
+  task_crashed         a background task died with an exception; it stays dead until the API restarts.
   disk_low             the uploads volume has < 10 % or < 1 GiB free.
   memory_high          the container uses > 90 % of its memory limit (cgroup v2 only).
   event_loop_blocked   the event loop stalled > 2 s in 3 consecutive intervals (blocking code on the loop).
@@ -32,6 +35,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.core.config import APP_VERSION, Settings
+from app.core.logging import SLOW_REQUEST_S
 from app.core.metrics import Sample, container_memory, disk_usage, metrics
 from app.db.session import check_database, pool_stats
 
@@ -41,6 +45,8 @@ WINDOW_S = 300.0
 DB_FAILURES_TO_ALERT = 3
 SERVER_ERRORS_MIN, SERVER_ERROR_RATIO = 5, 0.05
 AI_FAILURES_MIN, AI_FAILURE_RATIO = 5, 0.5
+SLOW_REQUESTS_MIN, SLOW_REQUEST_RATIO = 10, 0.10
+JOB_OVERDUE_INTERVALS = 2
 # AI_UNAVAILABLE reasons that need a human (key, billing, config), not patience.
 AI_CONFIG_REASONS = frozenset({"auth", "quota", "model", "not_configured"})
 DISK_FREE_MIN_RATIO, DISK_FREE_MIN_BYTES = 0.10, 1 << 30
@@ -60,6 +66,8 @@ class JobStatus:
     last_error: str | None = None
     last_success: float | None = None
     last_duration_s: float | None = None
+    interval_s: float | None = None  # set for jobs scheduled with run_every
+    since: float = field(default_factory=time.time)
 
 
 @dataclass
@@ -94,6 +102,7 @@ class Monitor:
         self._lag_streak = 0
         self._sender = sender or self._post_webhook
         self._classifier_status: Callable[[], str] = lambda: "disabled"
+        self._crashed_tasks: list[str] = []
 
     # ------------------------------------------------------------------------------------------- jobs
 
@@ -123,6 +132,7 @@ class Monitor:
 
     async def run_every(self, name: str, interval_s: float, fn: Callable[[], Awaitable[object]]) -> None:
         """Run `fn` as job `name` every `interval_s` seconds (first run after one interval)."""
+        self.jobs.setdefault(name, JobStatus()).interval_s = interval_s
         while True:
             await asyncio.sleep(interval_s)
             await self.run_job(name, fn)
@@ -161,6 +171,18 @@ class Monitor:
                 status.last_ok is False,
                 f"Background job '{name}' failed ({status.last_error}). See logs for job={name}.",
             )
+            await self._alert(
+                f"job_overdue:{name}",
+                status.last_ok is not False and _overdue(status),
+                f"Background job '{name}' has not completed in {JOB_OVERDUE_INTERVALS} scheduled intervals: it is "
+                f"probably stuck. See logs for job={name}; restarting the API clears it.",
+            )
+        await self._alert(
+            "task_crashed",
+            bool(self._crashed_tasks),
+            f"Background task(s) {', '.join(self._crashed_tasks)} crashed and won't run again until the API restarts. "
+            "See the 'background task crashed' log line.",
+        )
         await self._check_resources()
 
     async def _check_database(self) -> None:
@@ -189,6 +211,7 @@ class Monitor:
                 now,
                 {
                     "requests": metrics.total("http_requests_total"),
+                    "slow": metrics.total("http_slow_requests_total"),
                     "server_errors": metrics.total("http_requests_total", where=_server_error),
                     "ai_ok": metrics.total("gemini_requests_total", outcome="ok"),
                     "ai_config": metrics.total(
@@ -223,6 +246,14 @@ class Monitor:
             d["ai_config"] > 0 or (self.settings.APP_ENV == "prod" and self.settings.gemini_status == "missing"),
             "Gemini is refusing requests for a reason retrying won't fix (API key, quota/billing or model name). "
             "Search the logs for 'gemini unavailable' and run scripts/smoke_gemini.py.",
+        )
+        slow = d["slow"]
+        await self._alert(
+            "slow_requests",
+            slow >= SLOW_REQUESTS_MIN and slow >= SLOW_REQUEST_RATIO * max(requests, 1),
+            f"{int(slow)} of {int(requests)} requests in the last 5 min took over {SLOW_REQUEST_S:.0f} s without "
+            "waiting on Gemini. Check the database (db_check_duration_seconds, pool use) and event-loop lag; the "
+            "slow routes are in nutriscan_http_slow_requests_total and in WARNING 'request' log lines.",
         )
         down, ok = d["ai_down"], d["ai_ok"]
         await self._alert(
@@ -319,10 +350,16 @@ class Monitor:
             yield "db_pool_size", (), float(pool[1])
         yield "classifier_ready", (), 1.0 if self._classifier_status() == "loaded" else 0.0
 
+    def report_crash(self, task: asyncio.Task[None]) -> None:
+        """Done-callback for background tasks: a task that dies with an exception is logged, counted and alerted."""
+        if task.cancelled() or task.exception() is None:
+            return
+        self._crashed_tasks.append(task.get_name())
+        metrics.inc("unhandled_exceptions_total", where="task")
+        logger.error("background task crashed", extra={"task": task.get_name()}, exc_info=task.exception())
 
-def report_crash(task: asyncio.Task[None]) -> None:
-    """Done-callback for background tasks: a task that dies with an exception is logged and counted."""
-    if task.cancelled() or task.exception() is None:
-        return
-    metrics.inc("unhandled_exceptions_total", where="task")
-    logger.error("background task crashed", extra={"task": task.get_name()}, exc_info=task.exception())
+
+def _overdue(status: JobStatus) -> bool:
+    if status.interval_s is None:
+        return False
+    return time.time() - (status.last_success or status.since) > JOB_OVERDUE_INTERVALS * status.interval_s
