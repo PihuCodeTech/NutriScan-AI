@@ -268,7 +268,7 @@ function bodyImpact() {
   const oily = w.filter(m => m.street || m.fat >= 20).length;
   const fibre = avg('fibre'), sodium = avg('sodium'), sugar = avg('sugar');
 
-  // Nutrition patterns from the week's logged meals — not organ diagnoses.
+  // Nutrition patterns from the week's logged meals. These are not organ diagnoses.
   const salt = sodium === null ? null : sodium > 2300 ? 2 : sodium > 1800 ? 1 : 0;
   const saltText = sodium === null ? 'Not enough salt data yet.' : `Sodium averages ${Math.round(sodium)} mg a day (WHO suggests under ~2000 mg). Instant noodles, chips and pickles add up fast.`;
 
