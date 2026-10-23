@@ -22,6 +22,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings
 from app.core.errors import AppError, ai_unavailable
+from app.core.logging import mark_ai_call
 from app.core.metrics import metrics
 from app.services.llm import prompts
 
@@ -244,6 +245,7 @@ class GeminiClient:
         )
 
     async def _with_fallback(self, op_name: str, op: Callable[[str], Awaitable[T]]) -> T:
+        mark_ai_call()
         plan = self._model_plan()
         i = 0
         last_exc: BaseException | None = None
@@ -434,6 +436,7 @@ class GeminiClient:
         self, *, system: str, history: list[ChatHistoryItem], tools: list[ToolSpec] | None = None
     ) -> AsyncIterator[StreamChunk]:
         """Stream the answer. Retries/fallback apply only until the first chunk has been yielded."""
+        mark_ai_call()
         client = self._sdk()
         contents = self._contents(history)
         base_config = self._chat_kwargs(system, tools)
