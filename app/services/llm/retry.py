@@ -1,7 +1,7 @@
 """Gemini reliability policy: classify a failure, map it to a user-facing error, and small diagnostics.
 
 Kept separate from the Gemini calls in `gemini_client.py` so the retry/fallback behaviour can be read, tested
-and changed on its own (e.g. when swapping models or providers). Pure functions over exception objects — no
+and changed on its own (e.g. when swapping models or providers). Pure functions over exception objects, with no
 network, no SDK client."""
 
 from __future__ import annotations
