@@ -29,6 +29,7 @@ _DECLARED: dict[str, tuple[str, str]] = {
     "info": ("gauge", "Build and runtime info (always 1)."),
     "http_requests_total": ("counter", "HTTP requests by method, route template and status."),
     "http_request_duration_seconds": ("histogram", "HTTP request latency by method and route template."),
+    "http_slow_requests_total": ("counter", "Requests slower than 3 s that made no Gemini call, by route template."),
     "app_errors_total": ("counter", "Error envelopes returned, by error code (e.g. AI_UNAVAILABLE, NOT_FOOD)."),
     "events_total": ("counter", "Business events: success envelopes with a specific code (SCAN_CREATED, ...)."),
     "unhandled_exceptions_total": ("counter", "Unexpected exceptions, by where they happened (http, task)."),
