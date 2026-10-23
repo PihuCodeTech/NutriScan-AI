@@ -104,7 +104,10 @@ async def test_ready_is_503_when_database_is_down(app, client):
 @pytest.mark.parametrize(
     ("raw", "secret"),
     [
-        ("key=AIzaSyA1234567890abcdefghijklmnopqrstuv failed", "AIzaSyA1234567890abcdefghijklmnopqrstuv"),
+        (
+            "key=" + "AIza" + "DummyMockTestKeyForRedaction12345" + " failed",
+            "AIza" + "DummyMockTestKeyForRedaction12345",
+        ),
         ("Authorization: Bearer abc.def-ghi", "abc.def-ghi"),
         ("token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl", "eyJzdWIiOiIxIn0"),
         ("postgresql+asyncpg://postgres.ref:hunter2pass@db.example.com:5432/postgres", "hunter2pass"),
@@ -272,3 +275,74 @@ async def test_register_user_helper_still_works(client):
     # Guard: counting events in ok() must not change any response.
     headers = await register_user(client)
     assert (await client.get("/api/v1/users/me", headers=headers)).json()["success"] is True
+
+
+async def test_slow_requests_are_counted_unless_they_waited_on_gemini(client, mock_llm, monkeypatch):
+    from app.core import logging as app_logging
+
+    monkeypatch.setattr(app_logging, "SLOW_REQUEST_S", 0.0)  # every request is "slow"
+    original = mock_llm.analyze_food_image
+
+    async def analyze(*args, **kwargs):
+        app_logging.mark_ai_call()  # what the real Gemini client does
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(mock_llm, "analyze_food_image", analyze)
+    headers = await register_user(client)
+    assert (await create_scan(client, headers, make_jpeg())).status_code == 201
+    await client.get("/api/v1/meta")
+    assert metrics.total("http_slow_requests_total", route="/api/v1/meta") == 1
+    assert metrics.total("http_slow_requests_total", route="/api/v1/scans") == 0
+
+
+async def test_slow_request_rule(monitor):
+    mon, sent = monitor
+    await mon.check_once()
+    metrics.inc("http_requests_total", 200, method="GET", route="/api/v1/x", status=200)
+    metrics.inc("http_slow_requests_total", 9, method="GET", route="/api/v1/x")
+    await mon.check_once()
+    assert "slow_requests" not in mon.firing  # under the minimum count
+
+    metrics.inc("http_slow_requests_total", 21, method="GET", route="/api/v1/x")
+    await mon.check_once()
+    assert "slow_requests" in mon.firing
+    assert "30 of 200 requests" in sent.sent[-1]
+
+
+async def test_scheduled_job_that_stops_completing_is_overdue(monitor, monkeypatch):
+    mon, sent = monitor
+    clock = [1_000_000.0]
+    monkeypatch.setattr(monitoring.time, "time", lambda: clock[0])
+
+    async def fine():
+        return None
+
+    await mon.run_job("upload_sweep", fine)
+    mon.jobs["upload_sweep"].interval_s = 3600  # as run_every sets it
+    clock[0] += 2 * 3600 - 1
+    await mon.check_once()
+    assert mon.firing == []
+    clock[0] += 2  # no success for over two intervals: the job hangs
+    await mon.check_once()
+    assert mon.firing == ["job_overdue:upload_sweep"]
+    await mon.run_job("upload_sweep", fine)
+    await mon.check_once()
+    assert mon.firing == []
+    assert "RESOLVED job_overdue:upload_sweep" in sent.sent[-1]
+
+
+async def test_crashed_background_task_alerts(monitor):
+    import asyncio
+
+    mon, sent = monitor
+
+    async def boom():
+        raise RuntimeError("bug")
+
+    task = asyncio.create_task(boom(), name="guest-cleanup")
+    await asyncio.gather(task, return_exceptions=True)
+    mon.report_crash(task)
+    await mon.check_once()
+    assert mon.firing == ["task_crashed"]
+    assert "guest-cleanup" in sent.sent[-1]
+    assert metrics.value("unhandled_exceptions_total", where="task") == 1
