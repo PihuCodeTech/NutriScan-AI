@@ -5,7 +5,7 @@ description = "NutriScan AI: food photo nutrition scanner and nutrition chatbot 
 requires-python = ">=3.11"
 readme = "README.md"
 
-# Runtime dependencies are pinned in requirements.txt (and requirements-dev.txt for tooling).
+# Dependencies (runtime and dev tools) are pinned in requirements.txt.
 
 [tool.ruff]
 line-length = 120
