@@ -70,7 +70,7 @@ def _clean_validation_errors(errors: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """Attach handlers so every error — handled or not — uses the envelope."""
+    """Attach handlers so every error, handled or not, uses the envelope."""
 
     @app.exception_handler(AppError)
     async def _app_error(_: Request, exc: AppError) -> JSONResponse:
