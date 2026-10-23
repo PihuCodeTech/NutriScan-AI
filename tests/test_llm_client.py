@@ -1,4 +1,4 @@
-"""GeminiClient reliability (SDK calls monkeypatched — no network) and MockGeminiClient behaviour."""
+"""GeminiClient reliability (SDK calls monkeypatched, no network) and MockGeminiClient behaviour."""
 
 from __future__ import annotations
 
