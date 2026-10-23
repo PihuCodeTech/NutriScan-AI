@@ -199,7 +199,12 @@ async def add_user_message(
     if not had_messages and session.title == DEFAULT_TITLE:
         session.title = _auto_title(text) if text else "Food photo"
     session.updated_at = utcnow()
-    await db.commit()
+    try:
+        await db.commit()
+    except BaseException:
+        if image_path:  # no row references the photo, so nothing else would ever delete it
+            await storage.delete(image_path)
+        raise
     return msg, image_bytes
 
 
