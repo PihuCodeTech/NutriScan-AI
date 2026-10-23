@@ -35,7 +35,7 @@ from app.db.session import (
     warm_pool,
 )
 from app.services import maintenance, nutrition_db
-from app.services.monitoring import Monitor, report_crash
+from app.services.monitoring import Monitor
 
 logger = logging.getLogger("app")
 
@@ -101,6 +101,11 @@ async def _cleanup_guests(app: FastAPI) -> None:
         await maintenance.cleanup_guests(session, app.state.storage, app.state.settings.GUEST_RETENTION_DAYS)
 
 
+async def _sweep_uploads(app: FastAPI) -> None:
+    async with get_sessionmaker()() as session:
+        await maintenance.sweep_orphan_uploads(session, app.state.storage)
+
+
 async def _load_classifier(app: FastAPI) -> None:
     await app.state.classifier.load()
     if app.state.classifier.status == "error":  # load() logs the cause and lets scans run without hints
@@ -130,8 +135,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             name="guest-cleanup",
         ),
     ]
+    if settings.APP_ENV == "prod":
+        # Prod only: a dev machine often points one storage folder at several databases (SQLite, Supabase), and
+        # against the wrong one every photo looks orphaned. In dev, use scripts/sweep_uploads.py by hand.
+        sweep = monitor.run_every("upload_sweep", settings.GUEST_CLEANUP_INTERVAL_H * 3600, lambda: _sweep_uploads(app))
+        background.append(asyncio.create_task(sweep, name="upload-sweep"))
     for task in background:
-        task.add_done_callback(report_crash)
+        task.add_done_callback(monitor.report_crash)
     overrides = shell_overrides()
     if overrides:
         logger.warning(
