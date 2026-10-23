@@ -165,6 +165,8 @@ async def create_scan(
     description = description.strip()[:300] if description and description.strip() else None
 
     rel_path = await storage.save(image.data, "jpg")
+    # Until a scan row references the photo, nothing else will ever delete it: remove it on any failure.
+    saved = False
     try:
         predictions = await classifier.predict(image.data)
         analysis: FoodAnalysisLLM = await llm.analyze_food_image(
@@ -174,61 +176,63 @@ async def create_scan(
             user_ctx=user_context(user),
             description=description,
         )
-    except Exception:
-        await storage.delete(rel_path)
-        raise
 
-    scan = Scan(
-        user_id=user.id,
-        image_path=rel_path,
-        image_sha256=image.sha256,
-        description=description,
-        meal_type=meal_type,
-        meal_type_explicit=meal_type_explicit,
-        classifier_model=classifier.model_id if predictions is not None else None,
-        classifier_predictions=predictions,
-        ai_model=llm.last_model_used,
-        raw_ai_response=analysis.model_dump(mode="json"),
-    )
+        scan = Scan(
+            user_id=user.id,
+            image_path=rel_path,
+            image_sha256=image.sha256,
+            description=description,
+            meal_type=meal_type,
+            meal_type_explicit=meal_type_explicit,
+            classifier_model=classifier.model_id if predictions is not None else None,
+            classifier_predictions=predictions,
+            ai_model=llm.last_model_used,
+            raw_ai_response=analysis.model_dump(mode="json"),
+        )
 
-    if not analysis.is_food or not analysis.items:
-        scan.status = "rejected"
-        scan.totals = round_nutrients({})
-        scan.health = {}
+        if not analysis.is_food or not analysis.items:
+            scan.status = "rejected"
+            scan.totals = round_nutrients({})
+            scan.health = {}
+            scan.latency_ms = int((time.perf_counter() - started) * 1000)
+            db.add(scan)
+            await db.commit()
+            saved = True
+            reason = analysis.rejection_reason or "No food detected in the image."
+            logger.info("scan rejected", extra={"scan_id": scan.id, "latency_ms": scan.latency_ms})
+            raise AppError("NOT_FOOD", "No food detected in the image.", 422, {"scan_id": scan.id, "reason": reason})
+
+        items = [item_from_llm(i) for i in analysis.items]
+        await ground_items(db, items)  # replace estimates with foods-table values where the dish is known
+        totals = aggregate(i["nutrients"] for i in items)
+        targets = compute_targets(user.profile).nutrients
+        scan.status = "completed"
+        scan.meal_name = (analysis.meal_name or items[0]["name"]).strip()[:120]
+        scan.totals = totals
+        scan.health = score_meal(
+            totals, targets, meal_type if meal_type_explicit else None, tips=_clean_tips(analysis.tips)
+        )
+        scan.items = [ScanItem(position=pos, **it) for pos, it in enumerate(items)]
         scan.latency_ms = int((time.perf_counter() - started) * 1000)
         db.add(scan)
         await db.commit()
-        reason = analysis.rejection_reason or "No food detected in the image."
-        logger.info("scan rejected", extra={"scan_id": scan.id, "latency_ms": scan.latency_ms})
-        raise AppError("NOT_FOOD", "No food detected in the image.", 422, {"scan_id": scan.id, "reason": reason})
-
-    items = [item_from_llm(i) for i in analysis.items]
-    await ground_items(db, items)  # replace estimates with foods-table values where the dish is known
-    totals = aggregate(i["nutrients"] for i in items)
-    targets = compute_targets(user.profile).nutrients
-    scan.status = "completed"
-    scan.meal_name = (analysis.meal_name or items[0]["name"]).strip()[:120]
-    scan.totals = totals
-    scan.health = score_meal(
-        totals, targets, meal_type if meal_type_explicit else None, tips=_clean_tips(analysis.tips)
-    )
-    scan.items = [ScanItem(position=pos, **it) for pos, it in enumerate(items)]
-    scan.latency_ms = int((time.perf_counter() - started) * 1000)
-    db.add(scan)
-    await db.commit()
-    await db.refresh(scan, attribute_names=["items"])
-    logger.info(
-        "scan completed",
-        extra={
-            "scan_id": scan.id,
-            "items": len(items),
-            "score": scan.health["score"],
-            "latency_ms": scan.latency_ms,
-            "ai_model": scan.ai_model,
-            "classifier": scan.classifier_model,
-        },
-    )
-    return scan
+        saved = True
+        await db.refresh(scan, attribute_names=["items"])
+        logger.info(
+            "scan completed",
+            extra={
+                "scan_id": scan.id,
+                "items": len(items),
+                "score": scan.health["score"],
+                "latency_ms": scan.latency_ms,
+                "ai_model": scan.ai_model,
+                "classifier": scan.classifier_model,
+            },
+        )
+        return scan
+    finally:
+        if not saved:
+            await storage.delete(rel_path)
 
 
 def _recompute(scan: Scan, user: User) -> None:
