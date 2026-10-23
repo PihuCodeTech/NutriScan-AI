@@ -1,4 +1,4 @@
-"""Every error — handled or not — uses the envelope; rate limits; no stack traces leak."""
+"""Every error, handled or not, uses the envelope; rate limits; no stack traces leak."""
 
 import httpx
 from fastapi import APIRouter
