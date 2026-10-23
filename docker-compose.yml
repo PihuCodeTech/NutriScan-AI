@@ -4,7 +4,7 @@
 # CORS_ORIGINS. Compose refuses to start without POSTGRES_PASSWORD rather than fall back to a known password.
 # Using a managed database (Supabase) instead? Run only the api service and put its DATABASE_URL in .env:
 #   docker compose up --build --no-deps api   (and delete the DATABASE_URL line under api.environment)
-#   Backups are then Supabase's job (see README, "Backups and recovery").
+#   Backups then depend on your Supabase plan (see README, "Backups and recovery").
 services:
   db:
     image: postgres:16-alpine
