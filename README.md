@@ -13,6 +13,7 @@ The project is a FastAPI backend (REST + SSE under `/api/v1`) with a web app ser
 ## Contents
 
 - [Features](#features)
+- [Principles and conventions](#principles-and-conventions)
 - [Tech stack](#tech-stack)
 - [Project structure](#project-structure)
 - [Getting started](#getting-started)
@@ -40,6 +41,42 @@ The project is a FastAPI backend (REST + SSE under `/api/v1`) with a web app ser
 - Try everything as a guest without signing up. Guest data is deleted after a few days.
 - Run the whole API in mock mode, with no Gemini key and no model download, for tests and frontend work.
 
+## Principles and conventions
+
+**Who it's for.** Students in India living in hostels or on their own, eating at the mess, the canteen,
+street stalls or from instant noodles: budget-conscious, on phones and laptops alike, with varied diets
+(veg, eggetarian, non-veg, vegan) and allergies.
+
+**Product principles**
+
+1. The LLM never decides a number the backend can compute. Plate totals, daily totals, targets and the
+   health score are computed in Python, and nutrients come from the foods table where possible. The UI
+   marks table values ("DB") and AI estimates ("AI est.") so users know which is which.
+2. A scan takes 10 to 40 s, so the user always sees progress, and a clear message if something fails.
+3. Advice should be something a hostel student can act on today. Cheap, available swaps (curd, dal,
+   sprouts, eggs, fruit) that respect `diet_type`, allergies and kitchen are preferred to ideal plans.
+4. The tone encourages and never shames. No crash diets, skipped meals or intakes below a safe floor. No
+   diagnoses or prescriptions; medical questions are referred to a doctor or dietitian. On signs of
+   disordered eating, the app responds supportively, drops numbers and targets, and suggests talking to
+   someone.
+5. AI outputs carry *"Estimates only — not medical advice."* wherever the API spec says so.
+
+**Code conventions**
+
+- Python 3.11+, FastAPI, Pydantic v2, async SQLAlchemy 2.0, Alembic. Only `DATABASE_URL` switches SQLite
+  and PostgreSQL.
+- All Gemini calls go through `app/services/llm/gemini_client.py` (the only importer of `google.genai`).
+  Model names come from `GEMINI_MODEL` / `GEMINI_FALLBACK_MODEL`, never hard-coded.
+- Every endpoint returns the `{success, code, message, data}` envelope under `/api/v1`, in snake_case, with
+  the fixed nutrient keys documented at `GET /api/v1/meta`.
+- `MOCK_AI=true` must keep the whole API working without a key or model download.
+- CPU-bound work (classifier, image resizing) runs in a thread pool, never on the event loop.
+- Secrets only via `.env` (keep `.env.example` current). Type hints everywhere; `ruff check .` and
+  `pytest -q` pass before a change is done.
+
+**Non-goals:** barcode scanning, payments, push notifications, admin panel, social login. Don't invent
+users, testimonials or accuracy figures: none exist yet.
+
 ## Tech stack
 
 | Layer | Technology |
@@ -62,20 +99,22 @@ The project is a FastAPI backend (REST + SSE under `/api/v1`) with a web app ser
 │   ├── db/                 Engine, session and ORM models
 │   ├── schemas/            Request and response models
 │   ├── services/           Business logic: scan pipeline, nutrition, health engine, chat, insights, monitoring
+│   │   ├── chat/           Chat sessions, context building and function-calling tools
 │   │   └── llm/            Gemini client, mock client, prompts, output schemas, retry policy
-│   └── main.py             App factory and start-up
+│   ├── utils/              Time-zone and meal-time helpers
+│   └── main.py             App factory and start-up (background jobs, static web app)
 ├── alembic/                Database migrations
 ├── certs/                  Supabase root CA (TLS verification for the managed Postgres pooler)
 ├── docker/                 Container entrypoint (migrations, then the server); backup/ holds the backup scripts
 ├── docs/                   openapi.json and example payloads for every endpoint
 ├── frontend/               Web app served at /app/
 ├── ml/                     Optional fine-tuning script for Indian dishes
-├── scripts/                Seeding, smoke test, OpenAPI export, example generation, guest cleanup
+├── scripts/                Seeding, Gemini smoke test, OpenAPI export, example generation, guest cleanup, upload sweep
 ├── tests/                  pytest suite (tests/live holds opt-in calls to the real Gemini API)
 ├── Dockerfile
 ├── docker-compose.yml      API + PostgreSQL 16 + verified nightly backups
 ├── pyproject.toml          ruff and pytest configuration
-└── requirements*.txt       Runtime and development dependencies
+└── requirements.txt        All dependencies (runtime and dev tools), pinned
 ```
 
 ## Getting started
@@ -85,7 +124,7 @@ The project is a FastAPI backend (REST + SSE under `/api/v1`) with a web app ser
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cpu   # CPU-only PyTorch
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 cp .env.example .env
 ```
 
@@ -216,7 +255,7 @@ All settings come from environment variables (or `.env`); see [`.env.example`](.
 | `ALERT_WEBHOOK_URL` | | Slack or Discord incoming webhook for alerts; empty = alerts are only logged |
 | `ALERT_REPEAT_MIN` | `240` | Re-send a still-firing alert this often; `0` = once |
 | `MONITOR_INTERVAL_S` | `60` | How often the watchdog checks the database and evaluates alert rules |
-| `GUEST_CLEANUP_INTERVAL_H` | `24` | Guest cleanup runs on start-up, then this often |
+| `GUEST_CLEANUP_INTERVAL_H` | `24` | Guest cleanup runs on start-up, then this often (as does the unreferenced-photo sweep in prod) |
 
 ## API
 
@@ -232,7 +271,7 @@ nutrients always use the keys `calories`, `protein_g`, `carbohydrates_g`, `fat_g
 
 | Area | Endpoints | Purpose |
 |---|---|---|
-| System | `GET /health` · `GET /meta` | Status of database, classifier and Gemini · units, labels, enums, thresholds |
+| System | `GET /health` · `GET /health/ready` · `GET /meta` | Status of database, classifier and Gemini (`/ready` answers 503 when the database is down) · units, labels, enums, thresholds |
 | Auth | `POST /auth/register` · `POST /auth/login` · `POST /auth/guest` | 7-day bearer token; guest = throw-away account |
 | Users | `GET /users/me` · `PUT /users/me/profile` · `GET /users/me/targets` | Profile (partial update) and computed daily targets |
 | Scans | `POST /scans` · `GET /scans` · `GET /scans/{id}` · `DELETE /scans/{id}` | Scan a photo, list, view, delete |
@@ -244,6 +283,9 @@ nutrients always use the keys `calories`, `protein_g`, `carbohydrates_g`, `fat_g
 | | `POST /chat/sessions/{id}/messages` · `POST …/messages/stream` · `GET /chat/suggestions` | Text and photo messages, SSE streaming, starter prompts |
 | Media | `GET /media/{path}?exp=&sig=` | Uploaded photos, only through signed, expiring URLs |
 
+`GET /metrics` (Prometheus text) sits outside `/api/v1` and is disabled unless `METRICS_TOKEN` is set; see
+[Monitoring](#monitoring).
+
 - Interactive reference: `/docs` and `/redoc`. The exported schema is [`docs/openapi.json`](docs/openapi.json)
   (`python scripts/export_openapi.py`).
 - Real example payloads for every endpoint are in [`docs/examples/`](docs/examples)
@@ -251,23 +293,56 @@ nutrients always use the keys `calories`, `protein_g`, `carbohydrates_g`, `fat_g
 
 ## How it works
 
+### Overview
+
+```
+ browser: web app at /app/  (or any other client)
+        │  HTTPS, bearer token, JSON envelope or SSE
+        ▼
+┌─────────────────────────── FastAPI process ───────────────────────────┐
+│  /api/v1 routes ─► services (scan, intake, chat, insights, recipes)   │
+│                      │            │              │                    │
+│                      ▼            ▼              ▼                    │
+│              health engine   ViT classifier   LLM client ──────────────┼──► Gemini API
+│              (targets,       (thread pool)    gemini_client.py,       │
+│               scores)                         or mock when MOCK_AI    │
+│                                                                       │
+│  background: watchdog and alerts, guest cleanup, upload sweep (prod), │
+│              classifier load, DB keep-alive (PostgreSQL)              │
+└───────────┬──────────────────────────────────────┬────────────────────┘
+            ▼                                      ▼
+   SQLite / PostgreSQL                      STORAGE_DIR (photos,
+   (users, scans, intake, chat, foods)      served via signed URLs)
+```
+
 ### Scan pipeline (`POST /api/v1/scans`)
 
 ```
-upload ─► validate and normalise (type check, EXIF orientation, strip metadata, ≤1024 px, JPEG, sha256)
-       ─► save to storage
-       ─► classifier top-k dish hints                  [threadpool; skipped if disabled or failing]
-       ─► Gemini vision: items with grams, nutrients, confidence, plus 2–3 tips (one structured-JSON call)
-             └─ not food ─► scan stored as rejected ─► 422 NOT_FOOD
-       ─► nutrients from the curated foods table where the dish is known, else the model's estimate
-       ─► sanitise (clamps, Atwater check) ─► plate totals = Σ items
-       ─► health score and flags against the user's targets
-       ─► persist and return
+upload
+  │  content type and size check (MAX_UPLOAD_MB)            ─► 400 INVALID_IMAGE / 413 FILE_TOO_LARGE
+  ▼
+normalise   decode with Pillow, EXIF orientation, strip metadata, ≤ 1024 px, JPEG q85, sha256   [thread]
+  ▼
+save photo to STORAGE_DIR            (deleted again if any later step fails before the scan row is saved)
+  ▼
+classifier: top-k Food-101 dish hints             [thread; none if disabled, still loading or failing]
+  ▼
+Gemini vision, one structured-JSON call: items with grams, nutrients and confidence, plus 2–3 tips
+  │
+  ├─ not food ─► scan saved with status "rejected" ─► 422 NOT_FOOD (details carry the scan_id)
+  ▼
+per item: sanitise nutrients (clamp negatives, sub-nutrient ≤ parent, Atwater calorie check)
+  ▼
+per item: replace with foods-table values where the dish is known       nutrition_source = table | estimate
+  ▼
+plate totals = Σ items ─► health score and flags against the user's targets          (deterministic Python)
+  ▼
+save scan and items ─► 201 SCAN_CREATED
 ```
 
 The classifier is the transfer-learning component: a ViT pretrained on ImageNet-21k and fine-tuned on
-Food-101. Food-101 is single-label and Western-heavy, so its predictions are only hints; Gemini makes the
-multi-item decision.
+Food-101. Food-101 is single-label and Western-heavy, so its predictions are passed to Gemini as hints only,
+and Gemini decides which items are on the plate.
 
 The model never has the last word on numbers the backend can compute. Plate totals, daily totals, targets
 and the health score are deterministic Python (`app/services/health_engine.py`). Each item reports
@@ -287,14 +362,26 @@ and the health score are deterministic Python (`app/services/health_engine.py`).
 ### Chat (`POST /api/v1/chat/sessions/{id}/messages[/stream]`)
 
 ```
-save user message (+ photo) ─► system prompt from profile, targets, today's intake, linked scan
- ─► recent messages (only the current one carries image bytes)
- ─► Gemini with tools ─► function calls? ─► run tools scoped to this user (get_daily_intake, log_meal, …)
- ─► save reply and tool trace ─► JSON, or SSE: user_message → tool* → delta* → done
+save user message (+ normalised photo)
+  ▼
+system prompt: profile, targets, today's intake, linked scan (if any)
+  ▼
+history: last CHAT_HISTORY_TURNS messages (only the current one carries image bytes)
+  ▼
+Gemini turn with tools ◄──────────────────────────────────────┐
+  │                                                           │
+  ├─ function calls ─► run each tool for this user only ──────┘  (at most CHAT_MAX_TOOL_ROUNDS rounds,
+  │                                                               then one last turn without tools)
+  ▼ text only
+save assistant reply and tool trace
+  ▼
+JSON response, or SSE events: user_message, then tool / delta as they happen, then done (or error)
 ```
 
-Tool rounds are capped by `CHAT_MAX_TOOL_ROUNDS`. Replies respect diet type and allergies, avoid diagnoses,
-and respond supportively to signs of disordered eating.
+The tools are `get_user_profile`, `get_daily_intake`, `get_intake_summary`, `get_recent_scans`,
+`get_scan_details`, `estimate_meal` and `log_meal` (`app/services/chat/tools.py`). Each one only sees the
+current user's data. Replies respect diet type and allergies, avoid diagnoses, and respond supportively to
+signs of disordered eating.
 
 ### Gemini reliability
 
@@ -313,7 +400,10 @@ the background. Static asset URLs carry a `?v=N` query in `index.html`; bump it 
 Uploaded photos are not public. They are served only through `GET /api/v1/media/{path}` with a signed URL
 (HMAC over the path with a key derived from `JWT_SECRET` for photo links only, valid for `MEDIA_URL_TTL_S`). Guest accounts are deleted with their photos after
 `GUEST_RETENTION_DAYS`, on start-up and then every `GUEST_CLEANUP_INTERVAL_H` hours (or on demand with
-`python scripts/cleanup_guests.py`).
+`python scripts/cleanup_guests.py`). A photo whose scan or chat message fails to save is deleted
+straight away. In production, photos that no row references and that are over a day old are swept on the same
+schedule. Elsewhere, `python scripts/sweep_uploads.py` lists them and `--delete` removes them. Run it only
+with the `DATABASE_URL` the photos belong to: against another database, every photo looks unreferenced.
 
 ## Database
 
@@ -331,14 +421,14 @@ close to your users: each round trip to a distant region adds hundreds of millis
 
 ## Monitoring
 
-Built in, with no extra services or dependencies (sized for one instance). The code is in
-`app/core/metrics.py` and `app/services/monitoring.py`.
+Monitoring is built into the app and needs no extra services or dependencies. It is sized for a single
+instance, and the code is in `app/core/metrics.py` and `app/services/monitoring.py`.
 
 | What | Where |
 |---|---|
 | Logs | JSON lines on stdout: one `request` line per call (method, route, status, latency, `request_id`, `user_id`), Gemini calls with tokens and latency, job runs and alerts. Successful health and metrics probes are not logged |
 | Errors | Unhandled exceptions are logged with a traceback (`level=ERROR`) and counted; every error envelope is counted by `code` |
-| Metrics | `GET /metrics` (Prometheus text, needs `Authorization: Bearer $METRICS_TOKEN`): requests and latency per route, error codes, business events, Gemini calls, failures, tokens and latency, classifier failures, DB checks and pool use, background jobs, event-loop lag, memory, CPU, disk free |
+| Metrics | `GET /metrics` (Prometheus text, needs `Authorization: Bearer $METRICS_TOKEN`): requests and latency per route, slow non-AI requests, error codes, business events, Gemini calls, failures, tokens and latency, classifier failures, DB checks and pool use, background jobs, event-loop lag, memory, CPU, disk free |
 | Uptime | `GET /api/v1/health/ready` for an external monitor (503 when the database is down) |
 | Alerts | An in-process watchdog posts to `ALERT_WEBHOOK_URL` (and always logs `"msg": "alert firing"`) |
 
@@ -359,7 +449,10 @@ case an exception message contains one.
 | `server_errors` | ≥ 5 HTTP 5xx and ≥ 5 % of requests in 5 min (Gemini's 502/503 excluded) | Search the logs for `level=ERROR` |
 | `gemini_config` | Any AI request refused for auth, quota, model or a missing key | Key, billing or model name; run `scripts/smoke_gemini.py` |
 | `gemini_unavailable` | ≥ 5 AI requests failed after retries and fallback, and ≥ 50 % of Gemini calls failed, in 5 min | Usually a Google outage; check the status page |
-| `job_failed:<job>` | The last run of `guest_cleanup` or `classifier_load` failed | Job logs (`"job": "<name>"`) |
+| `slow_requests` | ≥ 10 requests that made no Gemini call took > 3 s, and ≥ 10 % of requests, in 5 min | Database latency or pool exhaustion, event-loop lag; slow routes are in `nutriscan_http_slow_requests_total` and WARNING `request` log lines |
+| `job_failed:<job>` | The last run of `guest_cleanup`, `upload_sweep` or `classifier_load` failed | Job logs (`"job": "<name>"`) |
+| `job_overdue:<job>` | A scheduled job (`guest_cleanup`, `upload_sweep`) hasn't completed for 2 intervals and didn't fail: it hangs | Job logs; restart the API |
+| `task_crashed` | A background task (watchdog, cleanup loop, keep-alive) died with an exception | Traceback in `background task crashed`; restart the API |
 | `disk_low` | Uploads volume < 10 % or < 1 GiB free | Grow the volume or prune |
 | `memory_high` | Container memory > 90 % of its limit (cgroup v2) | Bigger instance |
 | `event_loop_blocked` | The event loop stalled > 2 s in 3 checks in a row | CPU-bound code outside the thread pool |
@@ -386,9 +479,9 @@ An alert is sent when it starts, repeated every `ALERT_REPEAT_MIN` while it last
 start-up and then every `BACKUP_INTERVAL_HOURS` (24). Each run:
 
 1. Dumps the database with `pg_dump` (custom format) to `./backups/db-<UTC time>.dump`.
-2. **Verifies the dump** by restoring it into a scratch database (`<db>_restore_check`), checking that every
+2. Verifies the dump by restoring it into a scratch database (`<db>_restore_check`), checking that every
    core table and the schema version are present, logging row counts, then dropping the scratch database.
-   An untested backup is assumed to be broken.
+   A dump that has never been restored is treated as broken.
 3. Archives the uploaded photos to `./backups/uploads-<UTC time>.tar.gz` and checks that the archive reads
    back.
 4. Deletes backups older than `BACKUP_RETENTION_DAYS` (14). Files are owner-only (`0600`) because they contain
@@ -413,7 +506,7 @@ docker compose run --rm -T api sh -c 'tar -xzf - -C /data' < backups/uploads-<ST
 docker compose start api          # applies any newer migrations on start
 ```
 
-Practise this once on a spare machine and time it. That number is your real recovery time.
+Practise a restore once on a spare machine and time it; that gives you your real recovery time.
 
 **Supabase.** Backups are Supabase's job: daily backups (and optional point-in-time recovery) on paid plans,
 restored from the dashboard. Check what your plan includes. The free plan has no backups you can rely on, so
