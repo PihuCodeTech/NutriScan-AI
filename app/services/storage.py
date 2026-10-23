@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
 from anyio import Path as AsyncPath
+from anyio import to_thread
 
 from app.core import media
 
@@ -19,6 +21,7 @@ class Storage(Protocol):
     async def save(self, data: bytes, ext: str = "jpg") -> str: ...
     async def read(self, rel_path: str) -> bytes: ...
     async def delete(self, rel_path: str) -> None: ...
+    async def list_files(self, older_than_s: float = 0) -> list[str]: ...
     def url(self, rel_path: str) -> str: ...
 
 
@@ -54,6 +57,19 @@ class LocalStorage:
             await AsyncPath(self._abs(rel_path)).unlink(missing_ok=True)
         except (OSError, ValueError):
             logger.warning("could not delete stored file", extra={"path": rel_path})
+
+    async def list_files(self, older_than_s: float = 0) -> list[str]:
+        """Relative paths of stored files last modified more than `older_than_s` seconds ago."""
+
+        def scan() -> list[str]:
+            cutoff = time.time() - older_than_s
+            return sorted(
+                p.relative_to(self.root).as_posix()
+                for p in self.root.rglob("*")
+                if p.is_file() and not p.name.startswith(".") and p.stat().st_mtime < cutoff
+            )
+
+        return await to_thread.run_sync(scan)
 
     def url(self, rel_path: str) -> str:
         """A signed, expiring URL to the file (served by GET /api/v1/media/...)."""
