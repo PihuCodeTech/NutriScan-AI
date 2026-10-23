@@ -16,6 +16,9 @@ from app.core.metrics import metrics
 
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 user_id_var: ContextVar[str | None] = ContextVar("user_id", default=None)
+# Per request, a one-item list the middleware reads back: mutated (not re-set), so a Gemini call made in a child
+# task (streaming responses, BaseHTTPMiddleware) is still seen.
+_ai_call_var: ContextVar[list[bool] | None] = ContextVar("ai_call", default=None)
 
 _RESERVED = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
 
@@ -31,6 +34,17 @@ _SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 # Probe endpoints polled every few seconds: counted in metrics, but only logged when they fail.
 _QUIET_PATHS = frozenset({"/metrics", "/api/v1/health", "/api/v1/health/ready"})
+
+# A request that made no AI call and took longer than this is counted as slow (database, blocking code, ...).
+# Gemini calls take 2-20 s on their own, so requests that waited on one are left out.
+SLOW_REQUEST_S = 3.0
+
+
+def mark_ai_call() -> None:
+    """Note that the current request waits on a Gemini call, so its latency doesn't count as slow."""
+    holder = _ai_call_var.get()
+    if holder is not None:
+        holder[0] = True
 
 
 def route_template(scope: Scope) -> str | None:
@@ -110,6 +124,8 @@ class RequestContextMiddleware:
         rid = incoming or uuid.uuid4().hex[:16]
         token = request_id_var.set(rid)
         user_token = user_id_var.set(None)
+        ai_call = [False]
+        ai_token = _ai_call_var.set(ai_call)
         start = time.perf_counter()
         status = 500
 
@@ -131,8 +147,12 @@ class RequestContextMiddleware:
             route = route_template(scope)
             metrics.inc("http_requests_total", method=method, route=route or "unmatched", status=status)
             metrics.observe("http_request_duration_seconds", elapsed, method=method, route=route or "unmatched")
-            if path not in _QUIET_PATHS or status >= 400:
-                self.logger.info(
+            slow = elapsed >= SLOW_REQUEST_S and not ai_call[0]
+            if slow:
+                metrics.inc("http_slow_requests_total", method=method, route=route or "unmatched")
+            if path not in _QUIET_PATHS or status >= 400 or slow:
+                self.logger.log(
+                    logging.WARNING if slow else logging.INFO,
                     "request",
                     extra={
                         "method": method,
@@ -142,5 +162,6 @@ class RequestContextMiddleware:
                         "latency_ms": round(elapsed * 1000, 1),
                     },
                 )
+            _ai_call_var.reset(ai_token)
             user_id_var.reset(user_token)
             request_id_var.reset(token)
