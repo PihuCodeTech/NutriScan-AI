@@ -7,9 +7,9 @@ Data layout (ImageFolder):   ml/data/indian_food/<class_name>/*.jpg
   --food101-classes N so the model keeps its Western coverage.
 
 Training plan:
-  Phase 1 — freeze the ViT encoder, train the new classification head (3 epochs, lr 1e-3).
-  Phase 2 — unfreeze the last 4 encoder layers (8 epochs, lr 5e-5, cosine schedule, warmup 0.1,
-            label smoothing 0.1).
+  Phase 1: freeze the ViT encoder, train the new classification head (3 epochs, lr 1e-3).
+  Phase 2: unfreeze the last 4 encoder layers (8 epochs, lr 5e-5, cosine schedule, warmup 0.1,
+           label smoothing 0.1).
   Augmentations: RandomResizedCrop(224), RandomHorizontalFlip, ColorJitter.
 Reports top-1 / top-5 accuracy and saves to ml/output/indian-food-vit/.
 
