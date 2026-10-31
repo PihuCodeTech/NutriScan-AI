@@ -8,8 +8,6 @@ read their data or log a meal for them.
 
 The project is a FastAPI backend (REST and SSE under `/api/v1`) with a small web app served at `/app/`.
 
-> *Estimates only — not medical advice.*
-
 ![NutriScan AI dashboard: today's calories and macros against personal targets, an AI summary of the day with tips, today's meals, a 7-day calorie chart and the street-free streak](docs/images/dashboard.png)
 
 ## Features
